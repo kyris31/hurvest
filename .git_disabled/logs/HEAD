@@ -1,0 +1,5 @@
+0000000000000000000000000000000000000000 f138745d89e472323b01b77b7204927c58d55b3c Kyriakou Kyriakos <KKyriako5@eac.com.cy> 1747401692 +0300	commit (initial): Initial commit from Create Next App
+f138745d89e472323b01b77b7204927c58d55b3c 03b7f2aa90a170e9f9f73a0af8f60c0adad25da2 Kyriakou Kyriakos <KKyriako5@eac.com.cy> 1747416694 +0300	commit: feat: Implement core CRUD, sync setup, and soft deletes
+03b7f2aa90a170e9f9f73a0af8f60c0adad25da2 1c6d0b4e0571f61313d84241f3a6399a7c2d536c Kyriakou Kyriakos <KKyriako5@eac.com.cy> 1747545024 +0300	commit: PDF Works
+1c6d0b4e0571f61313d84241f3a6399a7c2d536c c3df42954c364a4b3b21207081b05cdcef684f58 Kyriakou Kyriakos <KKyriako5@eac.com.cy> 1747557303 +0300	commit: PDF Works2
+c3df42954c364a4b3b21207081b05cdcef684f58 e9c819614dbffcacb7efb27e8183291a2829f70c Kyriakou Kyriakos <KKyriako5@eac.com.cy> 1747561770 +0300	commit: Vercel Fix
