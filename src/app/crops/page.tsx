@@ -96,7 +96,7 @@ export default function CropsPage(/*{ syncCounter }: CropsPageProps*/) {
       setIsDeleting(id);
       setError(null);
       try {
-        await db.markForSync(db.crops, id, true);
+        await db.markForSync('crops', id, true); // Changed db.crops to 'crops' based on Vercel error
         // await fetchData(); // No longer need to manually call fetchData
       } catch (err) {
         console.error("Failed to delete crop:", err);

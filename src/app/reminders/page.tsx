@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { db, Reminder } from '@/lib/db'; // Removed unused PlantingLog, Crop, SeedBatch
-import Layout from '@/components/Layout';
+// import Layout from '@/components/Layout'; // Layout is handled by RootLayout
 import ReminderForm from '@/components/ReminderForm'; // Import the form
 import { PlusCircleIcon, CheckCircleIcon, XCircleIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/outline';
 
@@ -173,7 +173,7 @@ export default function RemindersPage() {
   );
 
   return (
-    <Layout>
+    // <Layout> // Removed redundant Layout wrapper
       <div className="p-4 md:p-6">
         <header className="mb-6">
           <div className="flex items-center justify-between">
@@ -227,6 +227,6 @@ export default function RemindersPage() {
           </div>
         </div>
       </div>
-    </Layout>
+    // </Layout>
   );
 }
