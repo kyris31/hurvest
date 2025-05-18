@@ -107,7 +107,7 @@ export default function CustomersPage() {
       setIsDeleting(id);
       setError(null);
       try {
-        await db.markForSync(db.customers, id, true);
+        await db.markForSync('customers', id, {}, true);
         // Note: Sales referencing this customer will have a customer_id that no longer points to an active customer.
         // The UI displaying sales should handle this gracefully (e.g., show "Deleted Customer").
         await fetchData();
