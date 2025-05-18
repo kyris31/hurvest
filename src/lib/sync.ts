@@ -3,7 +3,8 @@
 import { useState, useEffect } from 'react';
 import Dexie from 'dexie'; // Import Dexie
 import { supabase } from './supabaseClient';
-import { db, Crop, SeedBatch, InputInventory, PlantingLog, CultivationLog, HarvestLog, Sale, SaleItem, Customer, Invoice } from './db'; // Assuming all table types are exported
+import { db } from './db';
+import type { Crop, SeedBatch, InputInventory, PlantingLog, CultivationLog, HarvestLog, Sale, SaleItem, Customer, Invoice } from './db';
 
 // --- Online Status Hook ---
 export function useOnlineStatus() {
@@ -57,7 +58,7 @@ const TABLES_TO_SYNC = [
   { name: 'seedling_production_logs', dbTable: db.seedlingProductionLogs } // Explicitly use snake_case
 ] as const; // Use 'as const' for stricter typing of table names
 
-type TableName = typeof TABLES_TO_SYNC[number]['name'];
+// type TableName = typeof TABLES_TO_SYNC[number]['name']; // Removed unused type
 
 // Function to get unsynced items from a specific table
 async function getUnsyncedItems<T extends { id: string; _synced?: number; _last_modified?: number; is_deleted?: number }>(
@@ -75,11 +76,12 @@ async function pushChangesToSupabase() {
   }
   console.log("Attempting to push changes to Supabase...");
   let changesPushed = 0;
-  const errors: { table: string, id: string, error: any }[] = [];
+  const errors: { table: string, id: string, error: string }[] = [];
 
   for (const { name, dbTable } of TABLES_TO_SYNC) {
     // Type assertion needed because Dexie.Table<any, any> is not directly assignable
-    const table = dbTable as Dexie.Table<any, string>; 
+    // Using Dexie.Table<any, string> due to dynamic table iteration. Consider a more specific type if feasible.
+    const table = dbTable as Dexie.Table<any, string>;
     const unsynced = await getUnsyncedItems(table);
 
     if (unsynced.length > 0) {
@@ -109,8 +111,8 @@ async function pushChangesToSupabase() {
         } else {
           // Handle upsert for non-deleted items
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          let { _synced, _last_modified, is_deleted, deleted_at, ...itemToPushAny } = currentItem;
-          // Cast to a more specific type for manipulation, but ensure it's flexible enough
+          const { _synced, _last_modified, is_deleted, deleted_at, ...itemToPushAny } = currentItem;
+          // itemToPush needs to be mutable for deletions of properties
           let itemToPush: Record<string, any> = { ...itemToPushAny };
 
           // Data cleaning specific to tables before pushing
@@ -122,10 +124,12 @@ async function pushChangesToSupabase() {
           
           if (name === 'sale_items') {
             const saleItemToPush = itemToPush as Partial<SaleItem>;
-            if ((saleItemToPush.discount_type as any) === '') {
+            // Normalize potentially erroneous empty string or undefined to null for discount_type
+            if ((saleItemToPush.discount_type as unknown as string) === '' || saleItemToPush.discount_type === undefined) {
               saleItemToPush.discount_type = null;
             }
-            if (saleItemToPush.discount_type === null || saleItemToPush.discount_type === undefined) {
+            // If discount_type is null (either originally or after normalization), discount_value should also be null
+            if (saleItemToPush.discount_type === null) {
               saleItemToPush.discount_value = null;
             }
           }
@@ -155,18 +159,21 @@ async function pushChangesToSupabase() {
           changesPushed++;
           console.log(`Successfully synced (upserted) item ${currentItem.id} from ${name}`);
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error(`Failed to sync item ${item.id} from ${name}. Raw Supabase error:`, error);
-        let detailedError = 'Unknown error during upsert.';
-        if (error && typeof error === 'object') {
-            detailedError = `Message: ${error.message || 'N/A'}`;
-            if ('details' in error) detailedError += ` | Details: ${error.details}`;
-            if ('hint' in error) detailedError += ` | Hint: ${error.hint}`;
-            if ('code' in error) detailedError += ` | Code: ${error.code}`;
+        let detailedError = 'Unknown error during upsert/delete.';
+        if (error instanceof Error) {
+            detailedError = error.message;
+            if (error.cause && typeof error.cause === 'object') { // Supabase errors often have details in `cause`
+                const cause = error.cause as Record<string, unknown>;
+                if (cause.details) detailedError += ` | Details: ${cause.details}`;
+                if (cause.hint) detailedError += ` | Hint: ${cause.hint}`;
+                if (cause.code) detailedError += ` | Code: ${cause.code}`;
+            }
         } else if (typeof error === 'string') {
             detailedError = error;
         }
-        errors.push({ table: name, id: item.id, error: detailedError });
+        errors.push({ table: name, id: item.id, error: detailedError});
       }
     }
   }
@@ -190,7 +197,7 @@ async function fetchChangesFromSupabase() {
   }
   console.log("Attempting to fetch changes from Supabase...");
   let changesFetched = 0;
-  const errors: { table: string, error: any }[] = [];
+  const errors: { table: string, error: string }[] = [];
 
   for (const { name, dbTable } of TABLES_TO_SYNC) {
     try {
@@ -213,11 +220,12 @@ async function fetchChangesFromSupabase() {
 
       if (data && data.length > 0) {
         console.log(`Fetched ${data.length} new/updated items from ${name}`);
+        // Using Dexie.Table<any, string> due to dynamic table iteration.
         const table = dbTable as Dexie.Table<any, string>;
         
         await db.transaction('rw', table, async () => {
             for (const supabaseItem of data) {
-                const remoteItem = supabaseItem as { id: string; updated_at: string; is_deleted?: boolean; deleted_at?: string; [key: string]: any };
+                const remoteItem = supabaseItem as { id: string; updated_at: string; is_deleted?: boolean; deleted_at?: string; [key: string]: unknown };
 
                 if (remoteItem.is_deleted) {
                     // If server indicates item is deleted, delete it locally
@@ -257,19 +265,22 @@ async function fetchChangesFromSupabase() {
             }
         }
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(`Failed to fetch changes for table ${name}. Raw error:`, error);
-      let errorMessage = "Unknown error";
-      if (error && typeof error === 'object') {
-        if ('message' in error) errorMessage = error.message;
-        if ('details' in error) errorMessage += ` | Details: ${error.details}`;
-        if ('hint' in error) errorMessage += ` | Hint: ${error.hint}`;
-        if ('code'in error) errorMessage += ` | Code: ${error.code}`;
-      } else if (typeof error === 'string') {
-        errorMessage = error;
-      }
+      let errorMessage = "Unknown error during fetch.";
+        if (error instanceof Error) {
+            errorMessage = error.message;
+            if (error.cause && typeof error.cause === 'object') {
+                const cause = error.cause as Record<string, unknown>;
+                if (cause.details) errorMessage += ` | Details: ${cause.details}`;
+                if (cause.hint) errorMessage += ` | Hint: ${cause.hint}`;
+                if (cause.code) errorMessage += ` | Code: ${cause.code}`;
+            }
+        } else if (typeof error === 'string') {
+            errorMessage = error;
+        }
       console.error(`Formatted error for ${name}: ${errorMessage}`);
-      errors.push({ table: name, error: errorMessage });
+      errors.push({ table: name, error: errorMessage});
     }
   }
   if (changesFetched > 0) console.log(`Successfully fetched and applied ${changesFetched} changes from Supabase.`);

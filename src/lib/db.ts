@@ -1,4 +1,4 @@
-import Dexie, { Table } from 'dexie';
+import Dexie, { Table, UpdateSpec } from 'dexie';
 
 // Define interfaces for our data structures, mirroring Supabase tables
 // These should ideally be generated from your Supabase schema or shared types
@@ -236,6 +236,22 @@ export interface SeedlingProductionLog {
   deleted_at?: string;
 }
 
+export type HurvesthubTableName =
+  | 'crops'
+  | 'seedBatches'
+  | 'inputInventory'
+  | 'plantingLogs'
+  | 'cultivationLogs'
+  | 'harvestLogs'
+  | 'customers'
+  | 'sales'
+  | 'saleItems'
+  | 'invoices'
+  | 'syncMeta'
+  | 'trees'
+  | 'reminders'
+  | 'seedlingProductionLogs';
+
 class HurvesthubDB extends Dexie {
   crops!: Table<Crop, string>;
   seedBatches!: Table<SeedBatch, string>;
@@ -285,7 +301,7 @@ class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
       syncMeta: 'id',
       // reminders not in v2
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB from v1 to v2: Adding and defaulting is_deleted fields.");
       const tablesToUpgradeV2 = [
         "crops", "seedBatches", "inputInventory", "plantingLogs",
@@ -293,7 +309,7 @@ class HurvesthubDB extends Dexie {
         "saleItems", "invoices"
       ];
       for (const tableName of tablesToUpgradeV2) {
-        const table = tx.table(tableName);
+        const table = tx.table(tableName as HurvesthubTableName);
         await table.toCollection().modify(record => {
           if (record.is_deleted === undefined) {
             record.is_deleted = 0;
@@ -318,7 +334,7 @@ class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
       syncMeta: 'id',
       // reminders not in v3
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB to version 3: Adding customer_type and variety fields.");
       // For customer_type, default existing customers to 'Individual' or leave undefined
       await tx.table("customers").toCollection().modify(customer => {
@@ -346,17 +362,9 @@ class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
       syncMeta: 'id',
       // reminders not in v4
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async _tx => { // _tx because it's not used in this specific upgrade
       console.log("Upgrading HurvesthubDB to version 4: Adding plot_affected fields.");
       // plot_affected is a new optional field. Existing records will have it as undefined, which is fine.
-      // No explicit data modification needed unless a default is desired for old records.
-      // Example if you wanted to default:
-      // await tx.table("plantingLogs").toCollection().modify(log => {
-      //   if (log.plot_affected === undefined) log.plot_affected = 'N/A';
-      // });
-      // await tx.table("cultivationLogs").toCollection().modify(log => {
-      //   if (log.plot_affected === undefined) log.plot_affected = 'N/A';
-      // });
       console.log("Finished upgrading HurvesthubDB to version 4.");
     });
 
@@ -365,10 +373,7 @@ class HurvesthubDB extends Dexie {
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', // New table
       saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted' // Schema string changed (added discount_type, discount_value)
       // inputInventory's schema string ('id, name, type, total_purchase_cost, ...') was defined in v4.
-      // Other tables (plantingLogs, cultivationLogs, customers, seedBatches, crops, harvestLogs, sales, invoices, syncMeta)
-      // are carried forward from v4 as their schema strings do not change in v5.
-      // reminders not in v5
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB to version 5: Adding Trees table, modifying InputInventory (data migration), and adding discount fields to SaleItems.");
       await tx.table('inputInventory').toCollection().modify(item => {
         if (item.cost_per_unit !== undefined && item.initial_quantity !== undefined && item.initial_quantity > 0) {
@@ -384,12 +389,7 @@ class HurvesthubDB extends Dexie {
     // Version 6: Added 'variety' to Crop table
     this.version(6).stores({
       crops: 'id, name, variety, type, _last_modified, _synced, is_deleted'
-      // All other tables (trees, plantingLogs, cultivationLogs, customers, seedBatches, inputInventory,
-      // harvestLogs, sales, saleItems, invoices, syncMeta) are carried forward from version 5
-      // as their schema strings do not change in version 6.
-      // The duplicate 'trees' was the main issue.
-      // reminders not in v6
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB to version 6: Adding 'variety' field to crops table.");
       await tx.table('crops').toCollection().modify(crop => {
         if (crop.variety === undefined) {
@@ -402,12 +402,10 @@ class HurvesthubDB extends Dexie {
     // Version 7: Added 'notes' to Crop table
     this.version(7).stores({
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
-      trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
-      plantingLogs: 'id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
-      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, _last_modified, _synced, is_deleted',
-      // Only 'crops' schema string changes in v7. Other tables are carried forward.
-      // reminders not in v7
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', // Ensure trees is declared if not carried over
+      plantingLogs: 'id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', // Ensure carried over
+      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, _last_modified, _synced, is_deleted', // Ensure carried over
+    }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB to version 7: Adding 'notes' field to crops table.");
       await tx.table('crops').toCollection().modify(crop => {
         if (crop.notes === undefined) {
@@ -420,12 +418,8 @@ class HurvesthubDB extends Dexie {
     // Version 8: Removed 'variety' from SeedBatch table
     this.version(8).stores({
       seedBatches: 'id, crop_id, batch_code, _last_modified, _synced, is_deleted' // 'variety' REMOVED
-      // All other tables are carried forward as their schema strings do not change in version 8.
-      // reminders not in v8
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB to version 8: Removing 'variety' field from seedBatches table.");
-      // Data migration: 'variety' field will be removed from existing seed batch records.
-      // This data is now on the Crop record.
       await tx.table('seedBatches').toCollection().modify(sb => {
         delete sb.variety;
       });
@@ -436,51 +430,43 @@ class HurvesthubDB extends Dexie {
     this.version(9).stores({
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, _last_modified, _synced, is_deleted', // Schema string changed
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, _last_modified, _synced, is_deleted' // Schema string changed
-      // All other tables are carried forward as their schema strings do not change in version 9.
-      // reminders not in v9
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB to version 9: Adding 'current_quantity' to seedBatches and inputInventory tables.");
       await tx.table('seedBatches').toCollection().modify(sb => {
         if (sb.current_quantity === undefined) {
-          sb.current_quantity = sb.initial_quantity; // Initialize with initial_quantity
+          sb.current_quantity = sb.initial_quantity; 
         }
       });
-      // Also ensure inputInventory has current_quantity if it was missed in an earlier schema string for a version
-      // This is more of a safeguard if schema strings were not perfectly aligned across versions.
-      // However, InputInventory already has current_quantity from its own interface.
-      // The main focus here is seedBatches.
+      await tx.table('inputInventory').toCollection().modify(ii => {
+        if (ii.current_quantity === undefined) {
+          ii.current_quantity = ii.initial_quantity;
+        }
+      });
       console.log("Finished upgrading HurvesthubDB to version 9.");
     });
 
     // Version 10: Added Reminders table
     this.version(10).stores({
       reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
-      // Re-declare all other tables from v9
-      // Only 'reminders' is new in v10. Other tables are carried forward.
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async _tx => { // _tx because it's not used
         console.log("Upgrading HurvesthubDB to version 10: Adding Reminders table.");
-        // New table, no data migration needed for existing tables for this specific change.
-        // Initialize reminders with default values if necessary upon creation through app logic.
         console.log("Finished upgrading HurvesthubDB to version 10.");
     });
 
     // Version 11: Added qr_code_data to SeedBatch and InputInventory
     this.version(11).stores({
-      seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, _last_modified, _synced, is_deleted', // Added qr_code_data
-      inputInventory: 'id, name, type, total_purchase_cost, current_quantity, qr_code_data, _last_modified, _synced, is_deleted' // Added qr_code_data
-      // All other tables are carried forward.
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+      seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, _last_modified, _synced, is_deleted', 
+      inputInventory: 'id, name, type, total_purchase_cost, current_quantity, qr_code_data, _last_modified, _synced, is_deleted' 
+    }).upgrade(async tx => {
         console.log("Upgrading HurvesthubDB to version 11: Adding 'qr_code_data' to seedBatches and inputInventory tables.");
-        // New optional field, no data migration needed for existing records.
-        // qr_code_data will be undefined for old records.
         await tx.table('seedBatches').toCollection().modify(sb => {
             if (sb.qr_code_data === undefined) {
-              sb.qr_code_data = null; // Or keep as undefined if preferred
+              sb.qr_code_data = null; 
             }
         });
         await tx.table('inputInventory').toCollection().modify(ii => {
             if (ii.qr_code_data === undefined) {
-              ii.qr_code_data = null; // Or keep as undefined
+              ii.qr_code_data = null; 
             }
         });
         console.log("Finished upgrading HurvesthubDB to version 11.");
@@ -490,157 +476,160 @@ class HurvesthubDB extends Dexie {
     this.version(12).stores({
       seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
       plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted'
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    }).upgrade(async tx => { 
       console.log("Upgrading HurvesthubDB to version 12: Adding SeedlingProductionLog table and modifying PlantingLog table.");
       await tx.table('plantingLogs').toCollection().modify(pl => {
         if (pl.seedling_production_log_id === undefined) {
           pl.seedling_production_log_id = null;
         }
-        if (pl.quantity_planted === undefined) {
-            pl.quantity_planted = 0; // Default if missing
+        if (pl.quantity_planted === undefined) { // Ensure quantity_planted exists
+            pl.quantity_planted = 0; 
+        }
+        if (pl.quantity_unit === undefined) { // Ensure quantity_unit exists
+            pl.quantity_unit = 'items';
         }
       });
       console.log("Finished upgrading HurvesthubDB to version 12.");
     });
 
-    // Version 13: Enhanced SeedBatch and SeedlingProductionLog for better germination tracking
+    // Version 13: Added supplier_invoice_number to InputInventory
     this.version(13).stores({
-      seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, estimated_seeds_per_sowing_unit, _last_modified, _synced, is_deleted', // Added estimated_seeds_per_sowing_unit
-      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, quantity_sown_value, sowing_unit_from_batch, estimated_total_individual_seeds_sown, _last_modified, _synced, is_deleted' // Updated fields
-      // PlantingLogs schema string does not change from v12 for indexing purposes here.
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
-      console.log("Upgrading HurvesthubDB to version 13: Enhancing SeedBatch and SeedlingProductionLog.");
-      // For SeedBatch, new field estimated_seeds_per_sowing_unit will be undefined for old records.
-      await tx.table('seedBatches').toCollection().modify(sb => {
-        if (sb.estimated_seeds_per_sowing_unit === undefined) {
-          sb.estimated_seeds_per_sowing_unit = null;
-        }
-      });
-      // For SeedlingProductionLog, migrate old fields
-      await tx.table('seedlingProductionLogs').toCollection().modify(async spl => { // Made function async
-        if (spl.crop_id === undefined && spl.seed_batch_id) {
-            const batch = await tx.table('seedBatches').get(spl.seed_batch_id);
-            if (batch) spl.crop_id = batch.crop_id;
-        }
-        if (spl.quantity_seeds_sown !== undefined) {
-          spl.quantity_sown_value = spl.quantity_seeds_sown;
-          delete spl.quantity_seeds_sown;
-        } else if (spl.quantity_sown_value === undefined) {
-            spl.quantity_sown_value = 0; // Default if somehow missing
-        }
-
-        if (spl.seed_quantity_unit !== undefined) {
-          spl.sowing_unit_from_batch = spl.seed_quantity_unit;
-          delete spl.seed_quantity_unit;
-        }
-        
-        if (spl.estimated_total_individual_seeds_sown === undefined) {
-            // If old unit was 'seeds', then estimated_total_individual_seeds_sown is quantity_sown_value
-            if (spl.sowing_unit_from_batch && spl.sowing_unit_from_batch.toLowerCase().includes('seed')) {
-                spl.estimated_total_individual_seeds_sown = spl.quantity_sown_value;
-            } else {
-                spl.estimated_total_individual_seeds_sown = null; // Needs to be estimated/entered by user later
+        inputInventory: 'id, name, type, supplier_invoice_number, total_purchase_cost, current_quantity, qr_code_data, _last_modified, _synced, is_deleted'
+    }).upgrade(async tx => {
+        console.log("Upgrading HurvesthubDB to version 13: Adding 'supplier_invoice_number' to inputInventory.");
+        await tx.table('inputInventory').toCollection().modify(ii => {
+            if (ii.supplier_invoice_number === undefined) {
+                ii.supplier_invoice_number = null;
             }
-        }
-      });
-      console.log("Finished upgrading HurvesthubDB to version 13.");
+        });
+        console.log("Finished upgrading HurvesthubDB to version 13.");
     });
     
-    // Version 14: Added total_purchase_cost to SeedBatch
+    // Version 14: Added estimated_seeds_per_sowing_unit to SeedBatch
+    // and various fields to SeedlingProductionLog
     this.version(14).stores({
-      seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, estimated_seeds_per_sowing_unit, total_purchase_cost, _last_modified, _synced, is_deleted' // Added total_purchase_cost
-      // Other tables carried forward.
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
-      console.log("Upgrading HurvesthubDB to version 14: Adding 'total_purchase_cost' to seedBatches table.");
-      await tx.table('seedBatches').toCollection().modify(sb => {
-        if (sb.total_purchase_cost === undefined) {
-          sb.total_purchase_cost = null; // Initialize as null for existing records
-        }
-      });
-      console.log("Finished upgrading HurvesthubDB to version 14.");
+        seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, estimated_seeds_per_sowing_unit, _last_modified, _synced, is_deleted',
+        seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, quantity_sown_value, sowing_unit_from_batch, estimated_total_individual_seeds_sown, current_seedlings_available, _last_modified, _synced, is_deleted'
+    }).upgrade(async tx => {
+        console.log("Upgrading HurvesthubDB to version 14.");
+        await tx.table('seedBatches').toCollection().modify(sb => {
+            if (sb.estimated_seeds_per_sowing_unit === undefined) {
+                sb.estimated_seeds_per_sowing_unit = null;
+            }
+        });
+        await tx.table('seedlingProductionLogs').toCollection().modify(async spl => {
+            if (spl.quantity_sown_value === undefined) spl.quantity_sown_value = 0;
+            if (spl.sowing_unit_from_batch === undefined) spl.sowing_unit_from_batch = null;
+            if (spl.estimated_total_individual_seeds_sown === undefined) spl.estimated_total_individual_seeds_sown = null;
+            if (spl.current_seedlings_available === undefined && spl.actual_seedlings_produced !== undefined) {
+                spl.current_seedlings_available = spl.actual_seedlings_produced;
+            } else if (spl.current_seedlings_available === undefined) {
+                spl.current_seedlings_available = 0;
+            }
+        });
+        console.log("Finished upgrading HurvesthubDB to version 14.");
     });
 
-    // Version 15: Added supplier_invoice_number to InputInventory
+    // Version 15: Added organic_status to SeedBatch
     this.version(15).stores({
-      inputInventory: 'id, name, type, supplier_invoice_number, total_purchase_cost, current_quantity, qr_code_data, _last_modified, _synced, is_deleted'
-      // Other tables carried forward.
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
-      console.log("Upgrading HurvesthubDB to version 15: Adding 'supplier_invoice_number' to inputInventory table.");
-      await tx.table('inputInventory').toCollection().modify(ii => {
-        if (ii.supplier_invoice_number === undefined) {
-          ii.supplier_invoice_number = null;
-        }
-      });
-      console.log("Finished upgrading HurvesthubDB to version 15.");
+        seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, estimated_seeds_per_sowing_unit, organic_status, _last_modified, _synced, is_deleted'
+    }).upgrade(async tx => {
+        console.log("Upgrading HurvesthubDB to version 15: Adding 'organic_status' to seedBatches.");
+        await tx.table('seedBatches').toCollection().modify(sb => {
+            if (sb.organic_status === undefined) {
+                sb.organic_status = null;
+            }
+        });
+        console.log("Finished upgrading HurvesthubDB to version 15.");
     });
 
-    // Version 16: Added organic_status to SeedBatch
+    // Version 16: Added total_purchase_cost to InputInventory (if missed or for consistency)
+    // This might be redundant if already correctly defined in v4/v9, but ensures schema string matches interface
     this.version(16).stores({
-      seedBatches: 'id, crop_id, batch_code, supplier, purchase_date, initial_quantity, current_quantity, quantity_unit, total_purchase_cost, organic_status, qr_code_data, _last_modified, _synced, is_deleted' // Added organic_status
-      // Other tables carried forward.
-    }).upgrade(async tx => { // eslint-disable-line @typescript-eslint/no-unused-vars
-      console.log("Upgrading HurvesthubDB to version 16: Adding 'organic_status' to seedBatches table.");
-      await tx.table('seedBatches').toCollection().modify(sb => {
-        if (sb.organic_status === undefined) {
-          sb.organic_status = null; // Or a sensible default like 'Unknown'
-        }
-      });
-      console.log("Finished upgrading HurvesthubDB to version 16.");
+        inputInventory: 'id, name, type, supplier_invoice_number, purchase_date, initial_quantity, current_quantity, quantity_unit, total_purchase_cost, notes, qr_code_data, _last_modified, _synced, is_deleted'
+    }).upgrade(async tx => {
+        console.log("Upgrading HurvesthubDB to version 16: Ensuring all InputInventory fields are in schema string.");
+        // No data migration typically needed if fields were already present in interface and just missing from schema string.
+        // If total_purchase_cost was truly new here, migration from cost_per_unit would be needed.
+        // However, that migration was in v5. This is more about schema string completeness.
+        await tx.table('inputInventory').toCollection().modify(ii => {
+            // Example: ensure notes is not undefined if it should be null
+            if (ii.notes === undefined) ii.notes = null;
+        });
+        console.log("Finished upgrading HurvesthubDB to version 16.");
     });
-    
-    } // End of constructor
+
+    // Finalize table definitions
+    this.crops = this.table('crops');
+    this.seedBatches = this.table('seedBatches');
+    this.inputInventory = this.table('inputInventory');
+    this.plantingLogs = this.table('plantingLogs');
+    this.cultivationLogs = this.table('cultivationLogs');
+    this.harvestLogs = this.table('harvestLogs');
+    this.customers = this.table('customers');
+    this.sales = this.table('sales');
+    this.saleItems = this.table('saleItems');
+    this.invoices = this.table('invoices');
+    this.syncMeta = this.table('syncMeta');
+    this.trees = this.table('trees');
+    this.reminders = this.table('reminders');
+    this.seedlingProductionLogs = this.table('seedlingProductionLogs');
+  }
 
   async markForSync<T extends { id: string; _last_modified?: number; _synced?: number; is_deleted?: number; deleted_at?: string; }>(
-    table: Table<T, string>,
-    id: string,
-    deleted: boolean = false
-  ) {
-    if (deleted) {
-      return table.update(id, {
-        _synced: 0,
-        _last_modified: Date.now(),
-        is_deleted: 1,
-        deleted_at: new Date().toISOString()
-      } as any); 
+    tableName: HurvesthubTableName,
+    itemId: string,
+    itemChanges: Partial<T>, // Renamed for clarity
+    isDeleteOperation = false
+  ): Promise<number> {
+    const dataToUpdate: Partial<T> = {
+      ...itemChanges,
+      _last_modified: Date.now(),
+      _synced: 0,
+    };
+
+    if (isDeleteOperation) {
+      dataToUpdate.is_deleted = 1;
+      dataToUpdate.deleted_at = new Date().toISOString();
     }
-    return table.update(id, { _synced: 0, _last_modified: Date.now() } as any); 
+    // Cast to UpdateSpec<T> to satisfy Dexie's update method signature
+    return (this[tableName] as Table<T, string>).update(itemId, dataToUpdate as UpdateSpec<T>);
   }
 
   async addCropAndMark(crop: Omit<Crop, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'>): Promise<string> {
-    const id = crypto.randomUUID();
+    const newId = crypto.randomUUID();
     const now = new Date().toISOString();
-    const newCrop: Crop = {
+    const fullCrop: Crop = {
       ...crop,
-      id,
+      id: newId,
       created_at: now,
       updated_at: now,
-      _synced: 0,
       _last_modified: Date.now(),
+      _synced: 0,
       is_deleted: 0,
     };
-    await this.crops.add(newCrop);
-    return id;
+    await this.crops.add(fullCrop);
+    // No need to call markForSync here as we've set _synced to 0 already
+    return newId;
   }
-} // End of HurvesthubDB class
+}
 
 export const db = new HurvesthubDB();
 
-export async function getSyncStatus() {
-    const unsyncedCounts = {
-        crops: await db.crops.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        seedBatches: await db.seedBatches.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        inputInventory: await db.inputInventory.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        plantingLogs: await db.plantingLogs.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        cultivationLogs: await db.cultivationLogs.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        harvestLogs: await db.harvestLogs.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        customers: await db.customers.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        sales: await db.sales.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        saleItems: await db.saleItems.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        invoices: await db.invoices.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        trees: await db.trees.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        reminders: await db.reminders.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-        seedlingProductionLogs: await db.seedlingProductionLogs.where('_synced').equals(0).and(item => item.is_deleted !== 1).count(),
-    };
-    const totalUnsynced = Object.values(unsyncedCounts).reduce((sum, count) => sum + count, 0);
-    return { unsyncedCounts, totalUnsynced };
+// Utility function to get sync status for all tables
+export async function getSyncStatus(): Promise<Record<string, { unsynced: number, total: number }>> {
+  const status: Record<string, { unsynced: number, total: number }> = {};
+  const tableNames: HurvesthubTableName[] = [
+    'crops', 'seedBatches', 'inputInventory', 'plantingLogs', 
+    'cultivationLogs', 'harvestLogs', 'customers', 'sales', 
+    'saleItems', 'invoices', 'trees', 'reminders', 'seedlingProductionLogs'
+  ];
+
+  for (const tableName of tableNames) {
+    const table = db.table(tableName as HurvesthubTableName);
+    const unsyncedCount = await table.where('_synced').equals(0).count();
+    const totalCount = await table.count();
+    status[tableName] = { unsynced: unsyncedCount, total: totalCount };
+  }
+  return status;
 }

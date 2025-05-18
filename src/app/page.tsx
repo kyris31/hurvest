@@ -183,16 +183,16 @@ export default function DashboardPage() {
       setCalculatedCogs(proportionalCogs);
 
       // Calculate Total Input Costs for the filtered period (based on filtered cultivationLogs)
-      let periodInputCosts = 0;
-      cultivationLogs.forEach(log => { // 'cultivationLogs' is already filtered by date
-        if (log.input_inventory_id && log.input_quantity_used) {
-          const inputItem = inputInventory.find(inv => inv.id === log.input_inventory_id);
-          if (inputItem && inputItem.total_purchase_cost !== undefined && inputItem.initial_quantity !== undefined && inputItem.initial_quantity > 0) {
-            const costPerUnit = inputItem.total_purchase_cost / inputItem.initial_quantity;
-            periodInputCosts += log.input_quantity_used * costPerUnit;
-          }
-        }
-      });
+      // let periodInputCosts = 0; // Removed as it's unused
+      // cultivationLogs.forEach(log => { // 'cultivationLogs' is already filtered by date
+      //   if (log.input_inventory_id && log.input_quantity_used) {
+      //     const inputItem = inputInventory.find(inv => inv.id === log.input_inventory_id);
+      //     if (inputItem && inputItem.total_purchase_cost !== undefined && inputItem.initial_quantity !== undefined && inputItem.initial_quantity > 0) {
+      //       const costPerUnit = inputItem.total_purchase_cost / inputItem.initial_quantity;
+      //       periodInputCosts += log.input_quantity_used * costPerUnit;
+      //     }
+      //   }
+      // });
       // setTotalInputCosts(periodInputCosts); // Corresponds to removed unused state
       
       // Prepare Revenue by Month Data using pre-aggregated monthlyRevenueAndCogs

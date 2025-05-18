@@ -1,15 +1,10 @@
-import { PDFDocument, StandardFonts, rgb, PDFFont } from 'pdf-lib';
-import { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, db, Invoice } from './db';
+import { PDFDocument, StandardFonts, rgb, PDFFont, RGB } from 'pdf-lib';
+import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice } from './db';
+import { db } from './db';
 import { saveAs } from 'file-saver';
 import { APP_NAME, KK_BIOFRESH_INFO } from '@/config'; // Using alias, assuming config.ts will be moved
 
-interface CompanyInfo {
-    name: string;
-    addressLine1?: string;
-    addressLine2?: string;
-    contact?: string;
-    logoBytes?: Uint8Array;
-}
+// Removed Unused CompanyInfo interface
 
 async function getFullSaleDetails(saleId: string) {
     const sale = await db.sales.get(saleId);
@@ -74,12 +69,12 @@ export async function generateInvoicePDFBytes(saleId: string): Promise<Uint8Arra
 
     let y = height - 40; // Adjusted top margin
     const margin = 40;
-    const contentWidth = width - 2 * margin;
+    // const contentWidth = width - 2 * margin; // Removed unused variable
     const lineheight = 18;
     const smallLineHeight = 14;
 
     // Helper to draw text
-    const drawText = (text: string, x: number, currentY: number, options?: { font?: PDFFont, size?: number, color?: any }) => {
+    const drawText = (text: string, x: number, currentY: number, options?: { font?: PDFFont, size?: number, color?: RGB }) => {
         page.drawText(text, {
             x,
             y: currentY,
@@ -181,7 +176,7 @@ const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textS
     const col5X = margin + 370; // Discount
     const col6X = margin + 450; // Item Total
 
-    const drawInvoiceTableHeaders = (currentPage: any, currentY: number) => {
+    const drawInvoiceTableHeaders = (currentY: number) => { // Removed unused currentPage parameter
         drawText('Product', col1X, currentY, { font: boldFont, size: 10 });
         drawText('Details', col2X, currentY, { font: boldFont, size: 10 });
         drawText('Qty', col3X, currentY, { font: boldFont, size: 10 });
@@ -191,7 +186,7 @@ const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textS
         return currentY - (lineheight * 1.5); // Return new Y after headers
     };
 
-    y = drawInvoiceTableHeaders(page, y);
+    y = drawInvoiceTableHeaders(y);
 
     // Table Items
     let overallTotal = 0;
@@ -208,12 +203,12 @@ const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textS
             y = height - margin; // Reset Y to top margin (or a specific content start Y)
             // It might be desirable to redraw the main invoice header (logo, company, invoice#) here too.
             // For now, just redrawing table headers.
-            y = drawInvoiceTableHeaders(page, y);
+            y = drawInvoiceTableHeaders(y);
         }
 
         const price = Number(item.price_per_unit);
         const quantity = Number(item.quantity_sold);
-        let itemSubtotal = price * quantity;
+        const itemSubtotal = price * quantity;
         let discountDisplay = "-";
         let finalItemTotal = itemSubtotal;
 
@@ -231,9 +226,9 @@ const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textS
         finalItemTotal = Math.max(0, finalItemTotal);
         overallTotal += finalItemTotal;
         
-        let currentLineY = y;
-        currentLineY = drawText(item.productName, col1X, currentLineY, { size: 9 });
-        if(item.productDetails) currentLineY = drawText(item.productDetails, col2X, y, {size: 7, color: rgb(0.3,0.3,0.3)});
+        // let currentLineY = y; // Removed unused variable
+        drawText(item.productName, col1X, y, { size: 9 });
+        if(item.productDetails) drawText(item.productDetails, col2X, y, {size: 7, color: rgb(0.3,0.3,0.3)});
 
         // Align numbers to the right of their columns
         const qtyStr = String(quantity);
@@ -312,10 +307,10 @@ export async function downloadInvoicePDF(saleId: string) {
 
 // The old generateInvoiceHTML can be kept for debugging or removed
 export async function generateInvoiceHTML(saleId: string): Promise<string> {
-    const { sale, items, customer } = await getFullSaleDetails(saleId);
+    const { sale: _sale, items, customer: _customer } = await getFullSaleDetails(saleId); // Prefixed unused sale and customer
     const invoiceRecord = await db.invoices.where('sale_id').equals(saleId).first();
     if (!invoiceRecord) return "<p>Invoice record not found.</p>";
-    let totalAmount = items.reduce((sum, item) => sum + (item.quantity_sold * item.price_per_unit),0);
+    const totalAmount = items.reduce((sum, item) => sum + (item.quantity_sold * item.price_per_unit),0);
     // ... (rest of HTML generation, can be simplified or removed if PDF is primary)
     return `<div>HTML for Invoice ${invoiceRecord.invoice_number} - Total: €${totalAmount.toFixed(2)}</div>`;
 }

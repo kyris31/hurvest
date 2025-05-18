@@ -104,7 +104,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
     }
 
     let finalLogData: Omit<PlantingLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'>;
-    let stockUpdatePromise: Promise<any> | null = null;
+    let stockUpdatePromise: Promise<number> | null = null;
 
     if (plantingSourceType === 'seedBatch') {
       if (!seedBatchId) {
