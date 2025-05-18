@@ -148,7 +148,7 @@ export default function CultivationLogsPage() {
                   });
               }
           }
-          await db.markForSync("cultivationLogs", id, { is_deleted: 1, deleted_at: new Date().toISOString(), _synced: 0, _last_modified: Date.now() }); // Use camelCase table name
+          await db.markForSync(db.cultivationLogs, id, true);
         });
         await fetchData();
       } catch (err) {
