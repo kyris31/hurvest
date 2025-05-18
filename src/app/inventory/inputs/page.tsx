@@ -88,7 +88,7 @@ export default function InputInventoryPage() {
       setIsDeleting(id);
       setError(null);
       try {
-        await db.markForSync(db.inputInventory, id, true);
+        await db.markForSync('inputInventory', id, {}, true);
         await fetchData();
       } catch (err) {
         console.error("Failed to delete inventory item:", err);

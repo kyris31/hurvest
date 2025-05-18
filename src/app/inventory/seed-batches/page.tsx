@@ -131,7 +131,7 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
       setIsDeleting(id);
       setError(null);
       try {
-        await db.markForSync(db.seedBatches, id, true);
+        await db.markForSync('seedBatches', id, {}, true);
         // Consider implications for related data (e.g., planting logs using this batch)
         // Soft delete here doesn't automatically cascade to planting_logs' seed_batch_id if it's just a string ref.
         // The UI for planting logs would show "Unknown Batch" or similar if the batch is soft-deleted.

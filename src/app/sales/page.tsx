@@ -97,11 +97,11 @@ export default function SalesPage() {
         if (editingSale) {
           const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(editingSale.id).toArray();
           for (const item of itemsToSoftDelete) {
-            await db.markForSync(db.saleItems, item.id, true);
+            await db.markForSync('saleItems', item.id, {}, true);
           }
           const invoiceToSoftDelete = await db.invoices.where('sale_id').equals(editingSale.id).first();
           if (invoiceToSoftDelete) {
-            await db.markForSync(db.invoices, invoiceToSoftDelete.id, true);
+            await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true);
           }
           
           const updatedSaleData: Sale = {
@@ -206,13 +206,13 @@ export default function SalesPage() {
         await db.transaction('rw', db.sales, db.saleItems, db.invoices, async () => {
             const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(id).toArray();
             for (const item of itemsToSoftDelete) {
-              await db.markForSync(db.saleItems, item.id, true);
+              await db.markForSync('saleItems', item.id, {}, true);
             }
             const invoiceToSoftDelete = await db.invoices.where('sale_id').equals(id).first();
             if (invoiceToSoftDelete) {
-              await db.markForSync(db.invoices, invoiceToSoftDelete.id, true);
+              await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true);
             }
-            await db.markForSync(db.sales, id, true);
+            await db.markForSync('sales', id, {}, true);
         });
         await fetchData();
       } catch (err) {

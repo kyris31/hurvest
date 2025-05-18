@@ -115,7 +115,7 @@ export default function HarvestLogsPage() {
       setIsDeleting(id);
       setError(null);
       try {
-        await db.markForSync(db.harvestLogs, id, true);
+        await db.markForSync('harvestLogs', id, {}, true); // Correcting based on Vercel build error
         // Deleting a harvest log could affect sales if items from this harvest were sold.
         // The sales form/list should gracefully handle missing harvest logs.
         // await fetchData(); // No longer needed
