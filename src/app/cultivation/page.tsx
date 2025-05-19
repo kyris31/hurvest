@@ -148,7 +148,7 @@ export default function CultivationLogsPage() {
                   });
               }
           }
-          await db.markForSync('cultivationLogs', id, {}, true); // Correcting based on identified signature Vercel uses
+          await db.markForSync(db.cultivationLogs, id, true);
         });
         await fetchData();
       } catch (err) {
