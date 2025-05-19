@@ -593,7 +593,12 @@ class HurvesthubDB extends Dexie {
       dataToUpdate.deleted_at = new Date().toISOString();
     }
     // Cast to UpdateSpec<T> to satisfy Dexie's update method signature
-    return (this[tableName] as Table<T, string>).update(itemId, dataToUpdate as UpdateSpec<T>);
+    const table = this.table(tableName) as Table<T, string>;
+    if (!table) {
+      console.error(`[HurvesthubDB.markForSync] Table object not found for tableName: "${tableName}". 'this' context keys:`, Object.keys(this));
+      throw new Error(`[HurvesthubDB.markForSync] Table "${tableName}" could not be retrieved from the database instance. Ensure it is a valid, initialized table name.`);
+    }
+    return table.update(itemId, dataToUpdate as UpdateSpec<T>);
   }
 
   async addCropAndMark(crop: Omit<Crop, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'>): Promise<string> {

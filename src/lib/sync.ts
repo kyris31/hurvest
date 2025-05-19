@@ -6,6 +6,17 @@ import { supabase } from './supabaseClient';
 import { db } from './db';
 import type { Crop, SeedBatch, InputInventory, PlantingLog, CultivationLog, HarvestLog, Sale, SaleItem, Customer, Invoice } from './db';
 
+// Define and export the structured error type for sync operations
+export interface SyncError {
+  table: string;
+  id: string;
+  message: string;
+  code?: string; // e.g., Supabase error code like '23503'
+  details?: string; // e.g., Supabase error details
+  hint?: string; // e.g., Supabase error hint
+}
+// --- End of SyncError type definition ---
+
 // --- Online Status Hook ---
 export function useOnlineStatus() {
   // Initial state for SSR and first client render.
@@ -43,19 +54,26 @@ export function useOnlineStatus() {
 // --- Synchronization Logic (Placeholders and Initial Structure) ---
 
 const TABLES_TO_SYNC = [
+  // Parents / Independent
   { name: 'crops', dbTable: db.crops },
-  { name: 'seed_batches', dbTable: db.seedBatches },
-  { name: 'input_inventory', dbTable: db.inputInventory },
-  { name: 'planting_logs', dbTable: db.plantingLogs },
-  { name: 'cultivation_logs', dbTable: db.cultivationLogs },
-  { name: 'harvest_logs', dbTable: db.harvestLogs },
   { name: 'customers', dbTable: db.customers },
-  { name: 'sales', dbTable: db.sales },
-  { name: 'sale_items', dbTable: db.saleItems },
-  { name: 'invoices', dbTable: db.invoices },
-  { name: 'trees', dbTable: db.trees }, // Added trees table
-  { name: 'reminders', dbTable: db.reminders },
-  { name: 'seedling_production_logs', dbTable: db.seedlingProductionLogs } // Explicitly use snake_case
+  { name: 'trees', dbTable: db.trees },
+  { name: 'input_inventory', dbTable: db.inputInventory },
+
+  // Children with dependencies
+  { name: 'seed_batches', dbTable: db.seedBatches }, // Depends on crops
+  { name: 'seedling_production_logs', dbTable: db.seedlingProductionLogs }, // Depends on seed_batches, crops
+  { name: 'planting_logs', dbTable: db.plantingLogs }, // Depends on seed_batches or seedling_production_logs
+
+  // Further dependencies
+  { name: 'cultivation_logs', dbTable: db.cultivationLogs }, // Depends on planting_logs, input_inventory
+  { name: 'harvest_logs', dbTable: db.harvestLogs }, // Depends on planting_logs
+  { name: 'reminders', dbTable: db.reminders }, // Can depend on planting_logs
+
+  // Sales pipeline
+  { name: 'sales', dbTable: db.sales }, // Depends on customers
+  { name: 'sale_items', dbTable: db.saleItems }, // Depends on sales, harvest_logs
+  { name: 'invoices', dbTable: db.invoices }, // Depends on sales
 ] as const; // Use 'as const' for stricter typing of table names
 
 // type TableName = typeof TABLES_TO_SYNC[number]['name']; // Removed unused type
@@ -76,7 +94,7 @@ async function pushChangesToSupabase() {
   }
   console.log("Attempting to push changes to Supabase...");
   let changesPushed = 0;
-  const errors: { table: string, id: string, error: string }[] = [];
+  const errors: SyncError[] = [];
 
   for (const { name, dbTable } of TABLES_TO_SYNC) {
     // Type assertion needed because Dexie.Table<any, any> is not directly assignable
@@ -101,10 +119,14 @@ async function pushChangesToSupabase() {
             // If Supabase delete fails (e.g. RLS, record not found), it might still be an error.
             // However, if it's "not found", we might want to proceed with local deletion.
             // For now, throw to log it.
-            console.error(`Supabase delete error for ${currentItem.id} in ${name}:`, deleteError);
-            throw new Error(`Supabase delete failed: ${deleteError.message}`);
+            // Throw the deleteError so it's caught by the main catch block for consistent error processing
+            throw deleteError;
           }
           // If Supabase deletion was successful, hard delete from Dexie
+          // This part is problematic if the goal is to keep local data until server confirms.
+          // For now, we'll assume if Supabase delete is OK, local delete is OK.
+          // However, if the item was already deleted from Supabase (e.g. by another client),
+          // this local delete is fine.
           await table.delete(currentItem.id);
           changesPushed++; // Count as a pushed change (a deletion)
           console.log(`Successfully deleted item ${currentItem.id} from ${name} in Supabase and Dexie.`);
@@ -160,20 +182,47 @@ async function pushChangesToSupabase() {
           console.log(`Successfully synced (upserted) item ${currentItem.id} from ${name}`);
         }
       } catch (error: unknown) {
-        console.error(`Failed to sync item ${item.id} from ${name}. Raw Supabase error:`, error);
-        let detailedError = 'Unknown error during upsert/delete.';
-        if (error instanceof Error) {
-            detailedError = error.message;
-            if (error.cause && typeof error.cause === 'object') { // Supabase errors often have details in `cause`
-                const cause = error.cause as Record<string, unknown>;
-                if (cause.details) detailedError += ` | Details: ${cause.details}`;
-                if (cause.hint) detailedError += ` | Hint: ${cause.hint}`;
-                if (cause.code) detailedError += ` | Code: ${cause.code}`;
-            }
+        console.error(`Failed to sync item ${item.id} from ${name}. Raw error object:`, error);
+        
+        let userMessage = `Failed to sync item ${item.id} in table ${name}.`;
+        let errorCode: string | undefined;
+        let errorDetails: string | undefined;
+        let errorHint: string | undefined;
+
+        // Check if it's a Supabase error structure (often has code, details, message, hint)
+        // Supabase errors might be directly the error object or nested in `error.cause`
+        const supabaseError = (typeof error === 'object' && error !== null && 'code' in error && 'message' in error)
+                              ? error as { code: string, message: string, details?: string, hint?: string }
+                              : (error instanceof Error && error.cause && typeof error.cause === 'object' && 'code' in error.cause && 'message' in error.cause)
+                                ? error.cause as { code: string, message: string, details?: string, hint?: string }
+                                : null;
+
+        if (supabaseError) {
+          errorCode = supabaseError.code;
+          errorDetails = supabaseError.details;
+          errorHint = supabaseError.hint;
+          userMessage = supabaseError.message || userMessage; // Prefer Supabase message
+
+          if (errorCode === '23503') { // Foreign key violation
+            userMessage = `Cannot sync ${name} item ${item.id}: it references a related record that doesn't exist on the server. Details: ${errorDetails || supabaseError.message}`;
+          } else if (errorCode === '23505') { // Unique constraint violation
+             userMessage = `Cannot sync ${name} item ${item.id}: A unique value conflict occurred. Details: ${errorDetails || supabaseError.message}`;
+          }
+          // Add more specific messages for other common error codes if needed
+        } else if (error instanceof Error) {
+          userMessage = error.message;
         } else if (typeof error === 'string') {
-            detailedError = error;
+          userMessage = error;
         }
-        errors.push({ table: name, id: item.id, error: detailedError});
+
+        errors.push({
+          table: name,
+          id: item.id,
+          message: userMessage,
+          code: errorCode,
+          details: errorDetails,
+          hint: errorHint
+        });
       }
     }
   }
@@ -181,7 +230,7 @@ async function pushChangesToSupabase() {
   if (changesPushed > 0) console.log(`Successfully pushed ${changesPushed} changes to Supabase.`);
   if (errors.length > 0) {
       console.error("Detailed errors occurred during sync push:");
-      errors.forEach(err => console.error(`- Table: ${err.table}, ID: ${err.id}, Error: ${err.error}`));
+      errors.forEach(err => console.error(`- Table: ${err.table}, ID: ${err.id}, Code: ${err.code || 'N/A'}, Message: ${err.message}, Details: ${err.details || 'N/A'}`));
   }
   return { changesPushed, errors };
 }
@@ -197,7 +246,7 @@ async function fetchChangesFromSupabase() {
   }
   console.log("Attempting to fetch changes from Supabase...");
   let changesFetched = 0;
-  const errors: { table: string, error: string }[] = [];
+  const errors: SyncError[] = []; // Use the exported SyncError interface
 
   for (const { name, dbTable } of TABLES_TO_SYNC) {
     try {
@@ -266,25 +315,44 @@ async function fetchChangesFromSupabase() {
         }
       }
     } catch (error: unknown) {
-      console.error(`Failed to fetch changes for table ${name}. Raw error:`, error);
-      let errorMessage = "Unknown error during fetch.";
-        if (error instanceof Error) {
-            errorMessage = error.message;
-            if (error.cause && typeof error.cause === 'object') {
-                const cause = error.cause as Record<string, unknown>;
-                if (cause.details) errorMessage += ` | Details: ${cause.details}`;
-                if (cause.hint) errorMessage += ` | Hint: ${cause.hint}`;
-                if (cause.code) errorMessage += ` | Code: ${cause.code}`;
-            }
-        } else if (typeof error === 'string') {
-            errorMessage = error;
-        }
-      console.error(`Formatted error for ${name}: ${errorMessage}`);
-      errors.push({ table: name, error: errorMessage});
+      console.error(`Failed to fetch changes for table ${name}. Raw error object:`, error);
+      let userMessage = `Failed to fetch changes for table ${name}.`;
+      let errorCode: string | undefined;
+      let errorDetails: string | undefined;
+      let errorHint: string | undefined;
+
+      const supabaseError = (typeof error === 'object' && error !== null && 'code' in error && 'message' in error)
+                            ? error as { code: string, message: string, details?: string, hint?: string }
+                            : (error instanceof Error && error.cause && typeof error.cause === 'object' && 'code' in error.cause && 'message' in error.cause)
+                              ? error.cause as { code: string, message: string, details?: string, hint?: string }
+                              : null;
+      
+      if (supabaseError) {
+        errorCode = supabaseError.code;
+        errorDetails = supabaseError.details;
+        errorHint = supabaseError.hint;
+        userMessage = supabaseError.message || userMessage;
+      } else if (error instanceof Error) {
+        userMessage = error.message;
+      } else if (typeof error === 'string') {
+        userMessage = error;
+      }
+
+      errors.push({
+        table: name,
+        id: 'N/A', // Fetch errors are typically table-wide, not item-specific
+        message: userMessage,
+        code: errorCode,
+        details: errorDetails,
+        hint: errorHint
+      });
     }
   }
   if (changesFetched > 0) console.log(`Successfully fetched and applied ${changesFetched} changes from Supabase.`);
-  if (errors.length > 0) console.error("Errors occurred during fetch:", errors);
+  if (errors.length > 0) {
+    console.error("Detailed errors occurred during sync fetch:");
+    errors.forEach(err => console.error(`- Table: ${err.table}, ID: ${err.id}, Code: ${err.code || 'N/A'}, Message: ${err.message}, Details: ${err.details || 'N/A'}`));
+  }
   return { changesFetched, errors };
 }
 

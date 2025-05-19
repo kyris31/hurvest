@@ -124,7 +124,7 @@ export default function PlantingLogsPage() {
       setIsDeleting(id);
       setError(null);
       try {
-        await db.markForSync(db.plantingLogs, id, true);
+        await db.markForSync('plantingLogs', id, {}, true);
         // Soft deleting a planting log might orphan cultivation/harvest logs.
         // The UI for those sections should handle displaying "Unknown Planting Log" or similar.
         // await fetchData(); // No longer needed

@@ -92,15 +92,33 @@ export default function CropsPage(/*{ syncCounter }: CropsPageProps*/) {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this crop? This might affect related records if not handled by database constraints (e.g., seed batches).")) {
+    // First, check if this crop is used in seedling_production_logs
+    try {
+      const relatedSeedlingLogs = await db.seedlingProductionLogs
+        .where('crop_id')
+        .equals(id)
+        .filter(log => log.is_deleted !== 1) // Only consider active logs
+        .count();
+
+      if (relatedSeedlingLogs > 0) {
+        setError(`Cannot delete this crop because it is referenced by ${relatedSeedlingLogs} seedling production log(s). Please delete or reassign those logs first.`);
+        return;
+      }
+    } catch (checkError) {
+      console.error("Error checking for related seedling production logs:", checkError);
+      setError("Could not verify if crop is in use. Deletion aborted.");
+      return;
+    }
+
+    if (window.confirm("Are you sure you want to delete this crop?")) {
       setIsDeleting(id);
       setError(null);
       try {
-        await db.markForSync(db.crops, id, true);
-        // await fetchData(); // No longer need to manually call fetchData
+        await db.markForSync('crops', id, {}, true);
+        // Data will refresh via useLiveQuery automatically
       } catch (err) {
-        console.error("Failed to delete crop:", err);
-        setError("Failed to delete crop.");
+        console.error("Failed to mark crop for deletion:", err);
+        setError("Failed to mark crop for deletion. See console for details.");
       } finally {
         setIsDeleting(null);
       }

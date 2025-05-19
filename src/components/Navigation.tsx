@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import React, { useState, useEffect } from 'react';
+import { SyncError } from '../lib/sync'; // Import the SyncError type
 
 const navItems = [
   { href: '/', label: 'Dashboard' },
@@ -27,11 +28,20 @@ const quickAddNavItems = [
 interface NavigationProps {
   isOnline: boolean;
   syncing: boolean;
-  lastSyncStatus: string | null; // e.g., "Success", "Failed", "Syncing..."
+  lastSyncStatus: string | null;
   onManualSync: () => Promise<void>;
+  syncErrorDetails?: SyncError[]; // Optional: array of detailed sync errors
+  onClearSyncErrors?: () => void; // Optional: function to clear displayed errors
 }
 
-export default function Navigation({ isOnline, syncing, lastSyncStatus, onManualSync }: NavigationProps) {
+export default function Navigation({
+  isOnline,
+  syncing,
+  lastSyncStatus,
+  onManualSync,
+  syncErrorDetails,
+  onClearSyncErrors
+}: NavigationProps) {
   const [manualSyncMessage, setManualSyncMessage] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
@@ -122,6 +132,33 @@ export default function Navigation({ isOnline, syncing, lastSyncStatus, onManual
             )}
         </div>
       </div>
+      {/* Display Sync Error Details */}
+      {syncErrorDetails && syncErrorDetails.length > 0 && (
+        <div className="container mx-auto mt-2 p-2 bg-red-100 border border-red-400 text-red-700 rounded">
+          <div className="flex justify-between items-center mb-1">
+            <h4 className="font-bold">Sync Issues:</h4>
+            {onClearSyncErrors && (
+              <button
+                onClick={onClearSyncErrors}
+                className="text-xs text-red-700 hover:text-red-900 font-semibold"
+                title="Clear these messages"
+              >
+                Dismiss
+              </button>
+            )}
+          </div>
+          <ul className="list-disc list-inside text-xs space-y-1">
+            {syncErrorDetails.map((err, index) => (
+              <li key={index}>
+                <strong>Table:</strong> {err.table}, <strong>ID:</strong> {err.id || 'N/A'}<br />
+                <strong>Error:</strong> {err.message}
+                {err.code && ` (Code: ${err.code})`}
+                {err.details && <><br/><strong>Details:</strong> {err.details}</>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </nav>
   );
 }
