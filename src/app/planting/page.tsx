@@ -120,17 +120,59 @@ export default function PlantingLogsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this planting log? This may affect associated cultivation and harvest logs.")) {
+    setError(null); // Clear previous errors
+
+    try {
+      // Check for related Cultivation Logs
+      const relatedCultivationLogs = await db.cultivationLogs
+        .where('planting_log_id')
+        .equals(id)
+        .filter(log => log.is_deleted !== 1)
+        .count();
+
+      if (relatedCultivationLogs > 0) {
+        setError(`Cannot delete this planting log: it is referenced by ${relatedCultivationLogs} cultivation log(s). Please delete or reassign them first.`);
+        return;
+      }
+
+      // Check for related Harvest Logs
+      const relatedHarvestLogs = await db.harvestLogs
+        .where('planting_log_id')
+        .equals(id)
+        .filter(log => log.is_deleted !== 1)
+        .count();
+
+      if (relatedHarvestLogs > 0) {
+        setError(`Cannot delete this planting log: it is referenced by ${relatedHarvestLogs} harvest log(s). Please delete or reassign them first.`);
+        return;
+      }
+
+      // Check for related Reminders
+      const relatedReminders = await db.reminders
+        .where('planting_log_id')
+        .equals(id)
+        .filter(log => log.is_deleted !== 1)
+        .count();
+      
+      if (relatedReminders > 0) {
+        setError(`Cannot delete this planting log: it is referenced by ${relatedReminders} reminder(s). Please delete or reassign them first.`);
+        return;
+      }
+
+    } catch (checkError) {
+      console.error("Error checking for related records for planting log:", checkError);
+      setError("Could not verify if planting log is in use. Deletion aborted.");
+      return;
+    }
+
+    if (window.confirm("Are you sure you want to delete this planting log?")) {
       setIsDeleting(id);
-      setError(null);
       try {
         await db.markForSync('plantingLogs', id, {}, true);
-        // Soft deleting a planting log might orphan cultivation/harvest logs.
-        // The UI for those sections should handle displaying "Unknown Planting Log" or similar.
-        // await fetchData(); // No longer needed
+        // UI will update via useLiveQuery
       } catch (err) {
-        console.error("Failed to delete planting log:", err);
-        setError("Failed to delete planting log.");
+        console.error("Failed to mark planting log for deletion:", err);
+        setError("Failed to mark planting log for deletion. See console for details.");
       } finally {
         setIsDeleting(null);
       }
