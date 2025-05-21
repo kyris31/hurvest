@@ -95,7 +95,7 @@ export default function TreesPage() {
       setIsDeleting(id);
       setError(null);
       try {
-        await db.markForSync(db.trees, id, true);
+        await db.markForSync('trees', id, {}, true);
         await fetchData();
       } catch (err) {
         console.error("Failed to delete tree:", err);
