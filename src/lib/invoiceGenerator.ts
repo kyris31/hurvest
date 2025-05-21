@@ -1,4 +1,5 @@
 import { PDFDocument, StandardFonts, rgb, PDFFont, RGB } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice } from './db';
 import { db } from './db';
 import { saveAs } from 'file-saver';
@@ -29,7 +30,7 @@ const detailedItems = await Promise.all(items.map(async (item) => {
                     if (seedBatch) {
                         const crop = await db.crops.where({id: seedBatch.crop_id, is_deleted: 0}).first();
                         productName = crop?.name || 'Unknown Crop';
-                        productDetails = `(Batch: ${seedBatch.batch_code}, Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
+                        productDetails = `(Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
                     }
                 }
             }
@@ -53,6 +54,7 @@ export async function generateInvoicePDFBytes(saleId: string): Promise<Uint8Arra
     }
 
     const pdfDoc = await PDFDocument.create();
+    pdfDoc.registerFontkit(fontkit);
     let page = pdfDoc.addPage([612, 792]); // Standard US Letter size, declare with let
     const { width, height } = page.getSize();
     
@@ -66,22 +68,22 @@ export async function generateInvoicePDFBytes(saleId: string): Promise<Uint8Arra
     let boldFont: PDFFont;
 
     try {
-      // Ensure these paths are correct and the font files exist in `public/fonts/`
-      const fontBytes = await fetch('/fonts/NotoSansGreek-Regular.ttf').then(res => {
+      // Use the correct paths to NotoSans fonts
+      const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => {
         if (!res.ok) throw new Error(`Failed to fetch regular font: ${res.statusText}`);
         return res.arrayBuffer();
       });
-      const boldFontBytes = await fetch('/fonts/NotoSansGreek-Bold.ttf').then(res => {
+      const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => {
         if (!res.ok) throw new Error(`Failed to fetch bold font: ${res.statusText}`);
         return res.arrayBuffer();
       });
       
       font = await pdfDoc.embedFont(fontBytes);
       boldFont = await pdfDoc.embedFont(boldFontBytes);
-      console.log("Successfully embedded custom Greek-supporting fonts.");
+      console.log("Successfully embedded NotoSans fonts for invoice.");
 
     } catch (e) {
-      console.error("Error embedding custom font, falling back to Helvetica. Greek characters will likely not work.", e);
+      console.error("Error embedding NotoSans font for invoice, falling back to Helvetica. Greek characters will likely not work.", e);
       // Fallback to standard font if custom font loading fails.
       // NOTE: Standard fonts will NOT render Greek characters correctly.
       font = await pdfDoc.embedFont(StandardFonts.Helvetica);

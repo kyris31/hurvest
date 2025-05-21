@@ -154,7 +154,7 @@ export default function Layout({ children }: LayoutProps) {
               if (!syncing) handleManualSync();
             }, 500);
           }
-          startAutoSync(5, handleAutoSyncSuccess, handleAutoSyncError);
+          startAutoSync(0.416, handleAutoSyncSuccess, handleAutoSyncError); // Approx 25 seconds
           autoSyncProcessStartedRef.current = true;
         } else {
           console.log("Layout: Final check failed: User session not fully authenticated. Auto-sync not started.");
@@ -186,7 +186,7 @@ export default function Layout({ children }: LayoutProps) {
          autoSyncProcessStartedRef.current = false;
       }
     };
-  }, [isOnline, isUserAuthenticatedForSync, syncing, handleManualSync]);
+  }, [isOnline, isUserAuthenticatedForSync]); // Removed syncing and handleManualSync
 
   // Effect for redirecting unauthenticated users
   useEffect(() => {

@@ -114,23 +114,41 @@ async function pushChangesToSupabase() {
       try {
         if (currentItem.is_deleted === 1) {
           // Handle soft delete: delete from Supabase, then hard delete locally
-          console.log(`Attempting to delete item ${currentItem.id} from ${name} in Supabase.`);
-          const { error: deleteError } = await supabase.from(name).delete().eq('id', currentItem.id);
-          if (deleteError) {
-            // If Supabase delete fails (e.g. RLS, record not found), it might still be an error.
-            // However, if it's "not found", we might want to proceed with local deletion.
-            // For now, throw to log it.
-            // Throw the deleteError so it's caught by the main catch block for consistent error processing
-            throw deleteError;
+          if (name === 'sales') {
+            console.log(`[SalesDelete] Attempting to delete SALE item ${currentItem.id} from Supabase.`);
+          } else {
+            console.log(`Attempting to delete item ${currentItem.id} from ${name} in Supabase.`);
           }
-          // If Supabase deletion was successful, hard delete from Dexie
-          // This part is problematic if the goal is to keep local data until server confirms.
-          // For now, we'll assume if Supabase delete is OK, local delete is OK.
-          // However, if the item was already deleted from Supabase (e.g. by another client),
-          // this local delete is fine.
-          await table.delete(currentItem.id);
-          changesPushed++; // Count as a pushed change (a deletion)
-          console.log(`Successfully deleted item ${currentItem.id} from ${name} in Supabase and Dexie.`);
+          
+          const { data: deleteData, error: deleteError } = await supabase.from(name).delete().eq('id', currentItem.id).select(); // Added .select() to get data back
+          
+          if (name === 'sales') {
+            console.log(`[SalesDelete] Supabase response for SALE ${currentItem.id}: Error - ${JSON.stringify(deleteError)}, Data - ${JSON.stringify(deleteData)}`);
+          }
+
+          if (deleteError) {
+            console.error(`Supabase delete error for item ${currentItem.id} in ${name}: ${deleteError.message}. Details: ${deleteError.details || 'N/A'}. Hint: ${deleteError.hint || 'N/A'}. Code: ${deleteError.code || 'N/A'}`);
+            errors.push({
+              table: name,
+              id: currentItem.id,
+              message: `Supabase delete failed: ${deleteError.message}`,
+              code: deleteError.code,
+              details: deleteError.details,
+              hint: deleteError.hint
+            });
+            // Do NOT delete locally if Supabase delete failed, so it can be retried.
+          } else {
+            // If Supabase deletion was successful (no error object), then hard delete from Dexie.
+            // Supabase delete() with .select() might return an empty array in `deleteData` if the row was already gone,
+            // or the deleted row(s) if successful. No error means it's safe to proceed.
+            await table.delete(currentItem.id);
+            changesPushed++;
+            if (name === 'sales') {
+                console.log(`[SalesDelete] Successfully deleted SALE item ${currentItem.id} from Supabase and Dexie.`);
+            } else {
+                console.log(`Successfully deleted item ${currentItem.id} from ${name} in Supabase and Dexie.`);
+            }
+          }
         } else {
           // Handle upsert for non-deleted items
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -389,6 +407,7 @@ export function startAutoSync(
   onSyncSuccess: (message: string) => void,
   onSyncError: (errors: SyncError[]) => void
 ) {
+  console.log(`[startAutoSync] Called with intervalMinutes: ${intervalMinutes}`); // Add this log
   if (syncInterval) clearInterval(syncInterval);
   
   const performSync = async () => {
