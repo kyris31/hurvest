@@ -3,6 +3,7 @@
 import React, { useState } from 'react'; // Removed useCallback as fetchData is now inline, Removed useEffect
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, Crop } from '@/lib/db';
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import CropList from '@/components/CropList';
 import CropForm from '@/components/CropForm';
 import { PlusCircleIcon } from '@heroicons/react/24/outline';
@@ -72,9 +73,19 @@ export default function CropsPage(/*{ syncCounter }: CropsPageProps*/) {
         };
         await db.crops.add(newCrop);
       }
-      // await fetchData(); // No longer need to manually call fetchData, useLiveQuery handles updates
       setShowForm(false);
       setEditingCrop(null);
+      // After successful local save, request a push to the server
+      requestPushChanges().then(result => {
+        if (result.success) {
+          console.log("CropsPage: Push requested successfully after form submit.");
+        } else {
+          console.error("CropsPage: Push request failed after form submit.", result.errors);
+          // Optionally, set an error message for the user here if the push fails,
+          // though the main sync mechanism will also try and report errors.
+          // setError("Data saved locally, but failed to push to server immediately. It will sync later.");
+        }
+      });
     } catch (err: unknown) {
       // It's good practice to check the type of the error before accessing properties
       const errorMessage = err instanceof Error ? err.message : "Failed to save crop. Please try again.";

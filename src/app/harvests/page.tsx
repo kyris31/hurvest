@@ -3,6 +3,7 @@
 import React, { useState } from 'react'; // Removed useEffect, useCallback
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, HarvestLog } from '@/lib/db'; // Removed unused PlantingLog, SeedBatch, Crop
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import HarvestLogList from '@/components/HarvestLogList';
 import HarvestLogForm from '@/components/HarvestLogForm';
 import { exportHarvestLogsToCSV, exportHarvestLogsToPDF } from '@/lib/reportUtils';
@@ -95,6 +96,18 @@ export default function HarvestLogsPage() {
       // await fetchData(); // No longer needed
       setShowForm(false);
       setEditingLog(null);
+      // After successful local save, request a push to the server
+      try {
+        console.log("HarvestLogsPage: Push requesting after form submit...");
+        const pushResult = await requestPushChanges();
+        if (pushResult.success) {
+          console.log("HarvestLogsPage: Push requested successfully after form submit.");
+        } else {
+          console.error("HarvestLogsPage: Push request failed after form submit.", pushResult.errors);
+        }
+      } catch (syncError) {
+        console.error("Error requesting push after harvest log save:", syncError);
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to save harvest log. Please try again.";
       console.error("Failed to save harvest log:", err);
@@ -119,6 +132,18 @@ export default function HarvestLogsPage() {
         // Deleting a harvest log could affect sales if items from this harvest were sold.
         // The sales form/list should gracefully handle missing harvest logs.
         // await fetchData(); // No longer needed
+        // After successful local delete marking, request a push to the server
+        try {
+            console.log("HarvestLogsPage: Push requesting after delete...");
+            const pushResult = await requestPushChanges();
+            if (pushResult.success) {
+                console.log("HarvestLogsPage: Push requested successfully after delete.");
+            } else {
+                console.error("HarvestLogsPage: Push request failed after delete.", pushResult.errors);
+            }
+        } catch (syncError) {
+            console.error("Error requesting push after harvest log delete:", syncError);
+        }
       } catch (err) {
         console.error("Failed to delete harvest log:", err);
         setError("Failed to delete harvest log.");

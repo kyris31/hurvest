@@ -1,7 +1,8 @@
 import { db } from './db';
-import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory } from './db';
+import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier } from './db';
 import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
+import fontkit from '@pdf-lib/fontkit';
 
 // Removed unused interface DetailedSaleItemReport
 
@@ -51,7 +52,6 @@ async function getAllDetailedSalesForReport(filters?: DateRangeFilters): Promise
         db.crops.filter(c => c.is_deleted !== 1).toArray(),
         db.invoices.where('sale_id').anyOf(saleIds).and(i => i.is_deleted !== 1).toArray()
     ]);
-    // Removed redundant declarations of harvestLogs, plantingLogs, seedBatches, crops, invoices
 
     const reportItems: SaleReportItem[] = [];
 
@@ -237,11 +237,14 @@ async function getAllInventoryForReport(filters?: InventoryReportFilters): Promi
         seedBatchesQuery = seedBatchesQuery.and(sb => !!sb.purchase_date && sb.purchase_date <= end);
     }
     
-    const [inputs, seedBatches, crops] = await Promise.all([
+    const [inputs, seedBatches, crops, suppliers] = await Promise.all([
         inputsQuery.toArray(),
         seedBatchesQuery.toArray(),
-        db.crops.filter(c => c.is_deleted !== 1).toArray()
+        db.crops.filter(c => c.is_deleted !== 1).toArray(),
+        db.suppliers.filter(s => s.is_deleted !== 1).toArray() // Fetch suppliers
     ]);
+
+    const supplierMap = new Map(suppliers.map(s => [s.id, s.name])); // Create supplier map
 
     const reportItems: InventoryReportItem[] = [];
 
@@ -250,12 +253,12 @@ async function getAllInventoryForReport(filters?: InventoryReportFilters): Promi
             itemId: input.id,
             itemName: input.name,
             itemType: input.type || 'General Input', // Ensure itemType is set
-            supplier: input.supplier,
+            supplier: input.supplier_id ? supplierMap.get(input.supplier_id) : undefined,
             purchaseDate: input.purchase_date ? new Date(input.purchase_date).toLocaleDateString() : '',
             initialQuantity: input.initial_quantity,
             currentQuantity: input.current_quantity,
             quantityUnit: input.quantity_unit,
-            costPerUnit: undefined,
+            costPerUnit: undefined, // This report doesn't show cost per unit, value report does
             notes: input.notes,
             lastModified: input._last_modified ? new Date(input._last_modified).toLocaleString() : (input.updated_at ? new Date(input.updated_at).toLocaleString() : '')
         });
@@ -269,7 +272,7 @@ async function getAllInventoryForReport(filters?: InventoryReportFilters): Promi
             itemType: 'Seed Batch',
             cropName: crop?.name || 'Unknown Crop',
             batchCode: batch.batch_code,
-            supplier: batch.supplier,
+            supplier: batch.supplier_id ? supplierMap.get(batch.supplier_id) : undefined,
             purchaseDate: batch.purchase_date ? new Date(batch.purchase_date).toLocaleDateString() : '',
             initialQuantity: batch.initial_quantity,
             currentQuantity: batch.current_quantity, // Use the actual current_quantity
@@ -355,7 +358,6 @@ interface HarvestReportItem {
     cropVariety?: string;
     cropType?: string;
     cropNotes?: string;
-    // seedBatchCode?: string; // No longer needed for display in this enhanced format
     location?: string;
     quantityHarvested: number;
     quantityUnit: string;
@@ -381,8 +383,8 @@ async function getAllHarvestLogsForReport(filters?: DateRangeFilters): Promise<H
     
     const [plantingLogs, seedBatches, cropsData] = await Promise.all([
         db.plantingLogs.where('id').anyOf(plantingLogIds).and(p => p.is_deleted !== 1).toArray(),
-        db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(), // Still need seedBatches to link plantingLog to crop
-        db.crops.filter(c => c.is_deleted !== 1).toArray() // Fetches name, variety, type, notes
+        db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(), 
+        db.crops.filter(c => c.is_deleted !== 1).toArray() 
     ]);
     
     const reportItems: HarvestReportItem[] = [];
@@ -390,12 +392,10 @@ async function getAllHarvestLogsForReport(filters?: DateRangeFilters): Promise<H
     for (const hLog of harvestLogs) {
         const pLog = plantingLogs.find(pl => pl.id === hLog.planting_log_id);
         let crop: Crop | undefined;
-        // let seedBatchCode: string | undefined; // Not displayed directly anymore
 
         if (pLog && pLog.seed_batch_id) {
             const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
             if (sBatch) {
-                // seedBatchCode = sBatch.batch_code; // Still available if needed elsewhere
                 crop = cropsData.find(c => c.id === sBatch.crop_id);
             }
         }
@@ -409,12 +409,11 @@ async function getAllHarvestLogsForReport(filters?: DateRangeFilters): Promise<H
             cropVariety: crop?.variety,
             cropType: crop?.type,
             cropNotes: crop?.notes,
-            // seedBatchCode: seedBatchCode || 'N/A', // Removed from direct report item for this view
             location: pLog?.location_description || 'N/A',
             quantityHarvested: hLog.quantity_harvested,
             quantityUnit: hLog.quantity_unit,
             qualityGrade: hLog.quality_grade,
-            notes: hLog.notes, // Harvest specific notes
+            notes: hLog.notes, 
             lastModified: hLog._last_modified ? new Date(hLog._last_modified).toLocaleString() : (hLog.updated_at ? new Date(hLog.updated_at).toLocaleString() : '')
         });
     }
@@ -447,7 +446,7 @@ function convertHarvestLogsToCSV(data: HarvestReportItem[]): string {
             `"${item.plantingLogId}"`,
             `"${item.plantingDate || ''}"`,
             `"${(item.location || '').replace(/"/g, '""')}"`,
-            `"${(item.notes || '').replace(/"/g, '""')}"`, // These are harvest-specific notes
+            `"${(item.notes || '').replace(/"/g, '""')}"`, 
             `"${item.lastModified}"`
         ];
         csvRows.push(row.join(','));
@@ -480,8 +479,6 @@ export async function exportHarvestLogsToCSV(filters?: DateRangeFilters): Promis
 }
 
 
-// --- (Existing code for Sales, Inventory (non-value), Harvest reports) ... ---
-
 // --- Inventory Value Report Specific Logic ---
 
 interface InventoryValueReportDataItem {
@@ -502,72 +499,40 @@ interface InventoryValueReportDataItem {
 }
 
 async function getInventoryValueReportData(filters?: InventoryReportFilters): Promise<InventoryValueReportDataItem[]> {
-    const inventoryItems = await getAllInventoryForReport(filters); // Re-use existing filtered fetch
-    const reportItems: InventoryValueReportDataItem[] = [];
+    const inventoryItems = await getAllInventoryForReport(filters); // Re-use the detailed fetch
+    const valuedReportItems: InventoryValueReportDataItem[] = [];
 
     inventoryItems.forEach(item => {
-        let costPerUnit = item.costPerUnit; // Already calculated for seed batches in getAllInventoryForReport
-        let totalValue = 0;
-
-        if (item.itemType !== 'Seed Batch' && item.itemId) { // For general inputs, try to find original cost
-            const originalInput = db.inputInventory.get(item.itemId).then(orig => { // This is async, needs await or Promise.all
-                if (orig && orig.total_purchase_cost && orig.initial_quantity && orig.initial_quantity > 0) {
-                    return orig.total_purchase_cost / orig.initial_quantity;
-                }
-                return undefined;
-            });
-            // This approach is problematic within a forEach. Refactor needed for proper async handling.
-            // For simplicity in this pass, we'll assume costPerUnit is not available for general inputs here
-            // or needs to be pre-calculated and passed if essential for this specific report view.
-            // The current `item.costPerUnit` is undefined for general inputs from `getAllInventoryForReport`.
-        }
+        let costPerUnit = item.costPerUnit; // From getAllInventoryForReport (already calculated for seed batches)
         
-        if (costPerUnit !== undefined && item.currentQuantity !== undefined) {
-            totalValue = item.currentQuantity * costPerUnit;
-        }
-
-        reportItems.push({
-            ...item,
-            costPerUnit: costPerUnit, // May be undefined
-            totalValue: totalValue,
-        });
-    });
-    
-    // The async issue with fetching originalInput needs to be addressed for accurate general input valuation.
-    // For now, general inputs will likely show 0 value if costPerUnit isn't derived elsewhere.
-    // A better approach would be to fetch all inputs with their costs initially in getAllInventoryForReport
-    // or do a separate loop with Promise.all for general inputs if their valuation is critical here.
-
-    // Let's refine the general input cost calculation part
-    const valuedReportItems: InventoryValueReportDataItem[] = [];
-    for (const item of inventoryItems) {
-        let calculatedCostPerUnit = item.costPerUnit; // Already calculated for seed batches
-
         if (item.itemType !== 'Seed Batch' && item.itemId) {
-            const originalInput = await db.inputInventory.get(item.itemId);
-            if (originalInput && originalInput.total_purchase_cost && originalInput.initial_quantity && originalInput.initial_quantity > 0) {
-                calculatedCostPerUnit = originalInput.total_purchase_cost / originalInput.initial_quantity;
-            }
+            // For general inputs, we might need to fetch original cost if not directly on item
+            // This example assumes costPerUnit might be missing or needs recalculation
+            // For simplicity, if costPerUnit is undefined, we'll try to derive it if possible
+            // or leave it as is. A more robust solution might fetch original purchase details.
+            // The current `getAllInventoryForReport` sets costPerUnit to undefined for general inputs.
+            // We'll need to adjust if general inputs should have costs calculated here.
+            // For now, we'll assume general inputs don't have a costPerUnit for this report
+            // unless it was somehow populated (which it isn't by default in getAllInventoryForReport).
         }
-        
-        let totalValue = 0;
-        if (calculatedCostPerUnit !== undefined && item.currentQuantity !== undefined) {
-            totalValue = item.currentQuantity * calculatedCostPerUnit;
-        }
+
+        const currentQuantity = item.currentQuantity ?? 0;
+        const calculatedCostPerUnit = costPerUnit ?? 0; // Default to 0 if undefined
+        const totalValue = currentQuantity * calculatedCostPerUnit;
 
         valuedReportItems.push({
             ...item,
             costPerUnit: calculatedCostPerUnit,
-            totalValue: totalValue,
+            totalValue,
         });
-    }
-
-
+    });
+    
     valuedReportItems.sort((a, b) => {
         if (a.itemName.toLowerCase() < b.itemName.toLowerCase()) return -1;
         if (a.itemName.toLowerCase() > b.itemName.toLowerCase()) return 1;
         return 0;
     });
+
     return valuedReportItems;
 }
 
@@ -576,8 +541,8 @@ function convertInventoryValueToCSV(data: InventoryValueReportDataItem[]): strin
     if (data.length === 0) return '';
     const headers = [
         "Item ID", "Item Name", "Item Type", "Crop Name", "Batch Code", "Supplier",
-        "Purchase Date", "Initial Qty", "Current Qty", "Unit",
-        "Cost/Unit (€)", "Total Value (€)", "Notes", "Last Modified"
+        "Purchase Date", "Initial Quantity", "Current Quantity", "Quantity Unit",
+        "Cost Per Unit (€)", "Total Value (€)", "Notes", "Last Modified"
     ];
     const csvRows = [headers.join(',')];
 
@@ -593,7 +558,7 @@ function convertInventoryValueToCSV(data: InventoryValueReportDataItem[]): strin
             item.initialQuantity ?? '',
             item.currentQuantity ?? '',
             `"${item.quantityUnit || ''}"`,
-            item.costPerUnit !== undefined ? item.costPerUnit.toFixed(2) : '',
+            item.costPerUnit?.toFixed(2) ?? '0.00',
             item.totalValue.toFixed(2),
             `"${(item.notes || '').replace(/"/g, '""')}"`,
             `"${item.lastModified}"`
@@ -607,7 +572,7 @@ export async function exportInventoryValueToCSV(filters?: InventoryReportFilters
     try {
         const reportData = await getInventoryValueReportData(filters);
         if (reportData.length === 0) {
-            alert("No inventory data available for value report with selected filters.");
+            alert("No inventory value data available for CSV export.");
             return;
         }
         const csvData = convertInventoryValueToCSV(reportData);
@@ -625,34 +590,40 @@ export async function exportInventoryValueToPDF(filters?: InventoryReportFilters
     try {
         const reportData = await getInventoryValueReportData(filters);
         if (reportData.length === 0) {
-            alert("No inventory data for PDF value report with selected filters.");
+            alert("No inventory value data available for PDF report with selected filters.");
             return;
         }
 
         const pdfDoc = await PDFDocument.create();
+        pdfDoc.registerFontkit(fontkit);
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
-        const yPos = { y: height - margin }; // Use const for yPos object
+        const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos); 
-        yPos.y -= 10; // Add a bit of space after header
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        const tableHeaders = ["Item Name", "Type", "Crop", "Batch", "Current Qty", "Unit", "Cost/Unit", "Total Value"];
-        const columnWidths = [120, 80, 70, 70, 50, 50, 60, 70]; 
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
+        yPos.y -= 10; // Space after header
+
+        const tableHeaders = ["Item Name", "Type", "Crop", "Batch", "Supplier", "Qty", "Cost/Unit", "Total Value"];
+        const columnWidths = [100, 70, 70, 70, 80, 40, 50, 70]; 
         
         const tableData = reportData.map(item => [
             item.itemName,
             item.itemType,
-            item.cropName || '-',
-            item.batchCode || '-',
-            item.currentQuantity !== undefined ? String(item.currentQuantity) : '-',
-            item.quantityUnit || '-',
-            item.costPerUnit !== undefined ? `€${item.costPerUnit.toFixed(2)}` : '-',
+            item.cropName || '',
+            item.batchCode || '',
+            item.supplier || '',
+            item.currentQuantity ?? '',
+            item.costPerUnit ? `€${item.costPerUnit.toFixed(2)}` : '-',
             `€${item.totalValue.toFixed(2)}`
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin });
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont });
 
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -661,87 +632,114 @@ export async function exportInventoryValueToPDF(filters?: InventoryReportFilters
         saveAs(blob, `Hurvesthub_Inventory_Value_Report_${dateStamp}.pdf`);
 
     } catch (error) {
-        console.error("Failed to export inventory value to PDF:", error);
+        console.error("Failed to generate inventory value PDF:", error);
         alert(`Error generating inventory value PDF: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
 
-// Helper function to split text if it's too wide (simple version)
-// This function is used by drawPdfTable
+// Helper function to split text to fit within a cell width
 const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textSize: number): string[] => {
-    const lines: string[] = [];
-    let currentLine = "";
     const words = text.split(' ');
+    const lines: string[] = [];
+    let currentLine = '';
 
     for (const word of words) {
-        const testLine = currentLine + (currentLine ? " " : "") + word;
-        if (textFont.widthOfTextAtSize(testLine, textSize) > maxWidth && currentLine) {
-            lines.push(currentLine);
-            currentLine = word;
-        } else {
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        const width = textFont.widthOfTextAtSize(testLine, textSize);
+        if (width < maxWidth) {
             currentLine = testLine;
+        } else {
+            if (currentLine) lines.push(currentLine); // Push the line before it got too long
+            currentLine = word; // Start new line with the word that was too long
+            // If a single word is too long, it will be pushed as is and overflow.
+            // A more sophisticated solution might break words, but this is simpler.
+            if (textFont.widthOfTextAtSize(currentLine, textSize) > maxWidth) {
+                 lines.push(currentLine); // Push the long word on its own line
+                 currentLine = '';
+            }
         }
     }
-    if (currentLine) {
-        lines.push(currentLine);
-    }
-    return lines.length > 0 ? lines : [text]; // Return original text if no split needed or if it's a single very long word
+    if (currentLine) lines.push(currentLine); // Push the last line
+    return lines.length > 0 ? lines : ['']; // Ensure at least one empty line if text was empty
 };
 
-
-async function addPdfHeader(pdfDoc: PDFDocument, page: PDFPage, yPos: { y: number }) {
-    const { width: pageWidth } = page.getSize(); // height is not used directly here for calculations
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+async function addPdfHeader(pdfDoc: PDFDocument, page: PDFPage, yPos: { y: number }, font: PDFFont, boldFont: PDFFont) {
+    const { width: pageWidth } = page.getSize();
     const margin = 40;
     let currentY = yPos.y;
+    let logoImage: import('pdf-lib').PDFImage | undefined = undefined;
+    let logoHeightForCalc = 0;
 
     // Logo
     try {
-        const logoBytes = await fetch('/logo.png').then(res => res.arrayBuffer());
-        const logoImage = await pdfDoc.embedPng(logoBytes);
+        const logoBytes = await fetch('/LOGO.png').then(res => res.arrayBuffer());
+        logoImage = await pdfDoc.embedPng(logoBytes);
         const logoWidth = 50;
-        const logoHeight = logoImage.height * (logoWidth / logoImage.width);
+        logoHeightForCalc = logoImage.height * (logoWidth / logoImage.width);
         page.drawImage(logoImage, {
             x: margin,
-            y: currentY - logoHeight,
+            y: currentY - logoHeightForCalc,
             width: logoWidth,
-            height: logoHeight,
+            height: logoHeightForCalc,
         });
     } catch (e) {
         console.warn("Could not load or embed logo for PDF header:", e);
     }
     
-    // Report Title (example)
-    const title = "Report"; // Customize as needed
-    const titleSize = 18;
-    const titleWidth = boldFont.widthOfTextAtSize(title, titleSize);
-    page.drawText(title, {
-        x: pageWidth - margin - titleWidth, // Align to right
-        y: currentY - titleSize,
-        font: boldFont,
-        size: titleSize,
-        color: rgb(0,0,0)
-    });
-    currentY -= titleSize + 10; // Space after title
+    // Company Details
+    const companyDetails = [
+        "K.K. Biofresh",
+        "1ης Απριλίου 300",
+        "7520 Ξυλοφάγου, Λάρνακα",
+        "Phone: 99611241",
+        "Email: kyris31@gmail.com"
+    ];
+    const companyDetailSize = 8;
+    const companyDetailLineHeight = 10;
+    let companyDetailsY = currentY - logoHeightForCalc - companyDetailLineHeight; // Start below logo
 
-    // Date
+    if (logoImage) { // If logo is present, start details below it
+         companyDetailsY = currentY - logoHeightForCalc - companyDetailLineHeight;
+    } else { // If no logo, start from a bit lower than the top margin
+         companyDetailsY = currentY - companyDetailLineHeight - 10;
+    }
+
+    companyDetails.forEach(detail => {
+        page.drawText(detail, {
+            x: margin,
+            y: companyDetailsY,
+            font: font,
+            size: companyDetailSize,
+            color: rgb(0.2, 0.2, 0.2)
+        });
+        companyDetailsY -= companyDetailLineHeight;
+    });
+    
+    // Date (align with right margin, ensure it's below logo or at a similar height)
     const dateText = `Generated: ${new Date().toLocaleDateString()}`;
     const dateSize = 8;
     const dateWidth = font.widthOfTextAtSize(dateText, dateSize);
+    
+    // Adjust Y for date to be roughly aligned with top of logo or slightly below if no logo
+    const dateYPosition = currentY - dateSize - 5;
+
     page.drawText(dateText, {
         x: pageWidth - margin - dateWidth,
-        y: currentY - dateSize,
+        y: dateYPosition,
         font: font,
         size: dateSize,
         color: rgb(0.3,0.3,0.3)
     });
-    currentY -= dateSize + 20; // Space after date
+    
+    // Determine the lowest point reached by either logo/company details or the date text to set the new currentY
+    const bottomOfCompanyDetails = companyDetailsY + companyDetailLineHeight; // add back one line height as companyDetailsY is the start of the next line
+    const bottomOfDate = dateYPosition - dateSize; // Approximate bottom of date text
+    
+    currentY = Math.min(bottomOfCompanyDetails, bottomOfDate) - 20; // Space after header elements
 
-    yPos.y = currentY; // Update yPos for the caller
+    yPos.y = currentY;
 }
-
 
 async function drawPdfTable(
     pdfDoc: PDFDocument, 
@@ -753,6 +751,7 @@ async function drawPdfTable(
     options?: {
         font?: PDFFont,
         headerFont?: PDFFont,
+        boldFont?: PDFFont, 
         fontSize?: number,
         headerFontSize?: number,
         lineHeight?: number,
@@ -764,12 +763,12 @@ async function drawPdfTable(
         rowFillColorOdd?: RGB, 
         borderColor?: RGB, 
     }
-): Promise<PDFPage> { // Return the current page (could be new)
+): Promise<PDFPage> { 
     const { width: pageWidth, height: pageHeight } = page.getSize();
     const effectiveMargin = options?.margin ?? 40;
-    const effectivePageBottomMargin = options?.pageBottomMargin ?? effectiveMargin + 40; // Default bottom margin
+    const effectivePageBottomMargin = options?.pageBottomMargin ?? effectiveMargin + 40; 
     const effectiveFont = options?.font ?? await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const effectiveHeaderFont = options?.headerFont ?? await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const effectiveHeaderFont = options?.headerFont ?? options?.boldFont ?? await pdfDoc.embedFont(StandardFonts.HelveticaBold); 
     const effectiveFontSize = options?.fontSize ?? 8;
     const effectiveHeaderFontSize = options?.headerFontSize ?? 9;
     const effectiveLineHeight = options?.lineHeight ?? 12;
@@ -786,7 +785,7 @@ async function drawPdfTable(
 
     // Draw Headers
     let x = effectiveMargin;
-    const headerLineHeight = effectiveLineHeight * 1.2; // Slightly more for headers
+    const headerLineHeight = effectiveLineHeight * 1.2; 
 
     if (effectiveHeaderFillColor) {
         currentPage.drawRectangle({
@@ -799,14 +798,13 @@ async function drawPdfTable(
     }
     tableHeaders.forEach((header, i) => {
         const colWidth = columnWidths[i];
-        const textWidth = effectiveHeaderFont.widthOfTextAtSize(header, effectiveHeaderFontSize);
-        const textX = x + (colWidth - textWidth) / 2; // Center text
-        currentPage.drawText(header, { x: textX, y: currentY - headerLineHeight + cellPadding + 2, font: effectiveHeaderFont, size: effectiveHeaderFontSize, color: effectiveHeaderTextColor });
+        // const textWidth = effectiveHeaderFont.widthOfTextAtSize(header, effectiveHeaderFontSize); // Not needed for left align
+        // const textX = x + (colWidth - textWidth) / 2; // Center text
+        currentPage.drawText(header, { x: x + cellPadding, y: currentY - headerLineHeight + cellPadding + 2, font: effectiveHeaderFont, size: effectiveHeaderFontSize, color: effectiveHeaderTextColor });
         x += colWidth;
     });
     currentY -= headerLineHeight;
 
-    // Draw table border for header bottom
     currentPage.drawLine({
         start: { x: effectiveMargin, y: currentY },
         end: { x: pageWidth - effectiveMargin, y: currentY },
@@ -816,8 +814,7 @@ async function drawPdfTable(
 
     // Draw Rows
     tableData.forEach((row, rowIndex) => {
-        let maxRowHeight = effectiveLineHeight; // Min height for a row
-        // Pre-calculate max lines for this row to estimate height
+        let maxRowHeight = effectiveLineHeight; 
         row.forEach((cell, colIndex) => {
             const cellText = cell === undefined || cell === null ? '' : String(cell);
             const lines = splitTextToFit(cellText, columnWidths[colIndex] - 2 * cellPadding, effectiveFont, effectiveFontSize);
@@ -826,16 +823,15 @@ async function drawPdfTable(
         
         if (currentY - maxRowHeight < effectivePageBottomMargin) {
             currentPage = pdfDoc.addPage();
-            currentY = pageHeight - effectiveMargin; // Reset Y
-            // Redraw headers on new page
+            currentY = pageHeight - effectiveMargin; 
             x = effectiveMargin;
             if (effectiveHeaderFillColor) {
                 currentPage.drawRectangle({ x: effectiveMargin, y: currentY - headerLineHeight, width: pageWidth - 2*effectiveMargin, height: headerLineHeight, color: effectiveHeaderFillColor });
             }
             tableHeaders.forEach((header, i) => {
                 const colWidth = columnWidths[i];
-                const textWidth = effectiveHeaderFont.widthOfTextAtSize(header, effectiveHeaderFontSize);
-                currentPage.drawText(header, { x: x + (colWidth - textWidth) / 2, y: currentY - headerLineHeight + cellPadding + 2, font: effectiveHeaderFont, size: effectiveHeaderFontSize, color: effectiveHeaderTextColor });
+                // const textWidth = effectiveHeaderFont.widthOfTextAtSize(header, effectiveHeaderFontSize); // Not needed for left align
+                currentPage.drawText(header, { x: x + cellPadding, y: currentY - headerLineHeight + cellPadding + 2, font: effectiveHeaderFont, size: effectiveHeaderFontSize, color: effectiveHeaderTextColor });
                 x += colWidth;
             });
             currentY -= headerLineHeight;
@@ -848,14 +844,13 @@ async function drawPdfTable(
         }
 
         let cellX = effectiveMargin;
-        let actualRowEndY = currentY; // Track where content actually ends for this row
-
+        
         row.forEach((cell, colIndex) => {
             const colWidth = columnWidths[colIndex];
             const cellText = cell === undefined || cell === null ? '' : String(cell);
             const textLinesCell = splitTextToFit(String(cellText), colWidth - 2 * cellPadding, effectiveFont, effectiveFontSize);
             
-            let lineYOffset = currentY - effectiveFontSize - cellPadding / 2; // Start drawing text from top of cell
+            let lineYOffset = currentY - effectiveFontSize - cellPadding / 2; 
             
             textLinesCell.forEach(line => {
                 currentPage.drawText(line, {
@@ -863,23 +858,20 @@ async function drawPdfTable(
                     y: lineYOffset,
                     font: effectiveFont,
                     size: effectiveFontSize,
-                    color: rgb(0,0,0) // Default text color
+                    color: rgb(0,0,0) 
                 });
                 lineYOffset -= effectiveLineHeight;
             });
-            actualRowEndY = Math.min(actualRowEndY, lineYOffset + effectiveLineHeight - maxRowHeight); // Adjust based on actual content drawn
             cellX += colWidth;
         });
-        currentY -= maxRowHeight; // Move Y down by the calculated max height of the row
+        currentY -= maxRowHeight; 
         
-        // Draw row bottom border
         currentPage.drawLine({ start: { x: effectiveMargin, y: currentY }, end: { x: pageWidth - effectiveMargin, y: currentY }, thickness: 0.5, color: effectiveBorderColor });
     });
 
-    yPos.y = currentY; // Update yPos for the caller
+    yPos.y = currentY; 
     return currentPage;
 }
-
 
 export async function exportSalesToPDF(filters?: DateRangeFilters): Promise<void> {
     try {
@@ -890,16 +882,22 @@ export async function exportSalesToPDF(filters?: DateRangeFilters): Promise<void
         }
 
         const pdfDoc = await PDFDocument.create();
-        let page = pdfDoc.addPage(); // Initial page
+        pdfDoc.registerFontkit(fontkit);
+        let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos);
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         yPos.y -= 10;
 
         const tableHeaders = ["Date", "Customer", "Invoice#", "Product", "Qty", "Price", "Discount", "Total"];
-        const columnWidths = [60, 100, 70, 120, 30, 50, 60, 60];
+        const columnWidths = [60, 85, 70, 100, 30, 50, 60, 60]; // Adjusted widths
         
         const tableData = salesReportData.map(item => [
             item.saleDate,
@@ -912,7 +910,7 @@ export async function exportSalesToPDF(filters?: DateRangeFilters): Promise<void
             `€${item.itemTotal.toFixed(2)}`
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin });
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont });
 
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
@@ -930,39 +928,46 @@ export async function exportInventoryToPDF(filters?: InventoryReportFilters): Pr
     try {
         const inventoryReportData = await getAllInventoryForReport(filters);
         if (inventoryReportData.length === 0) {
-            alert("No inventory data for PDF report with selected filters.");
+            alert("No inventory data available for PDF report with selected filters.");
             return;
         }
 
         const pdfDoc = await PDFDocument.create();
+        pdfDoc.registerFontkit(fontkit);
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos);
-        yPos.y -=10;
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        const tableHeaders = ["Item Name", "Type", "Crop", "Batch", "Supplier", "Current Qty", "Unit"];
-        const columnWidths = [120, 80, 80, 80, 80, 60, 50];
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
+        yPos.y -= 10; // Space after header
+
+        const tableHeaders = ["Item Name", "Type", "Crop", "Batch Code", "Supplier", "Qty", "Unit", "Notes"];
+        const columnWidths = [100, 60, 70, 70, 80, 40, 50, 100];
         
         const tableData = inventoryReportData.map(item => [
             item.itemName,
             item.itemType,
-            item.cropName || '-',
-            item.batchCode || '-',
-            item.supplier || '-',
-            item.currentQuantity !== undefined ? String(item.currentQuantity) : '-',
-            item.quantityUnit || '-'
+            item.cropName || '',
+            item.batchCode || '',
+            item.supplier || '',
+            item.currentQuantity ?? '',
+            item.quantityUnit || '',
+            item.notes || ''
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin });
-        
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont });
+
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Inventory_Summary_Report_${dateStamp}.pdf`);
+        saveAs(blob, `Hurvesthub_Inventory_Report_${dateStamp}.pdf`);
 
     } catch (error) {
         console.error("Failed to generate inventory PDF:", error);
@@ -970,43 +975,50 @@ export async function exportInventoryToPDF(filters?: InventoryReportFilters): Pr
     }
 }
 
-
 export async function exportHarvestLogsToPDF(filters?: DateRangeFilters): Promise<void> {
     try {
         const harvestReportData = await getAllHarvestLogsForReport(filters);
         if (harvestReportData.length === 0) {
-            alert("No harvest log data for PDF report with selected filters.");
+            alert("No harvest log data available for PDF report with selected filters.");
             return;
         }
         const pdfDoc = await PDFDocument.create();
+        pdfDoc.registerFontkit(fontkit);
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos);
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
         yPos.y -= 10;
 
-        const tableHeaders = ["Harvest Date", "Crop", "Variety", "Qty", "Unit", "Quality", "Location"];
-        const columnWidths = [70, 100, 80, 50, 50, 70, 100];
+        const tableHeaders = ["Harvest Date", "Crop", "Variety", "Qty", "Unit", "Quality", "Planting Date", "Location", "Notes"];
+        const columnWidths = [60, 80, 70, 40, 40, 60, 60, 80, 80];
         
         const tableData = harvestReportData.map(item => [
             item.harvestDate,
             item.cropName,
-            item.cropVariety || '-',
+            item.cropVariety || '',
             item.quantityHarvested,
             item.quantityUnit,
-            item.qualityGrade || '-',
-            item.location || '-'
+            item.qualityGrade || '',
+            item.plantingDate || '',
+            item.location || '',
+            item.notes || ''
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin });
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont });
 
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_HarvestLogs_Report_${dateStamp}.pdf`);
+        saveAs(blob, `Hurvesthub_Harvest_Logs_Report_${dateStamp}.pdf`);
 
     } catch (error) {
         console.error("Failed to generate harvest logs PDF:", error);
@@ -1015,23 +1027,18 @@ export async function exportHarvestLogsToPDF(filters?: DateRangeFilters): Promis
 }
 
 
-// --- Seedling Lifecycle Report ---
 export interface SeedlingLifecycleReportItem {
-    seedlingLogId: string;
-    sowingDate: string;
+    seedBatchId: string;
+    seedBatchCode: string;
     cropName?: string;
-    seedBatchCode?: string;
-    quantitySown?: number; // From SeedlingProductionLog.quantity_sown_value
-    sowingUnit?: string; // From SeedlingProductionLog.sowing_unit_from_batch
-    actualSeedlingsProduced?: number;
-    currentSeedlingsAvailable?: number;
-    plantingLogId?: string;
-    plantingDate?: string;
-    quantityPlanted?: number; // From PlantingLog
-    harvestsCount: number;
-    totalQuantityHarvested: number;
-    totalSalesValueFromHarvests: number;
-    notes?: string; // Seedling log notes
+    sowingDate: string;
+    quantitySownDisplay: string; // e.g., "100 seeds" or "5 grams"
+    seedlingsProduced: number;
+    seedlingsTransplanted: number;
+    totalHarvestedFromSeedlings: number;
+    totalSoldFromSeedlings: number;
+    currentSeedlingsAvailable: number; // From SeedlingProductionLog
+    notes?: string; // SeedlingProductionLog notes
 }
 
 async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promise<SeedlingLifecycleReportItem[]> {
@@ -1044,57 +1051,50 @@ async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promi
     }
     const seedlingLogs = await seedlingLogsQuery.toArray();
 
+    const seedBatchIds = seedlingLogs.map(sl => sl.seed_batch_id);
+    const cropIds = seedlingLogs.map(sl => sl.crop_id);
+    const seedlingLogIds = seedlingLogs.map(sl => sl.id);
+
+    const [seedBatches, crops, plantingLogs, harvestLogs, saleItems] = await Promise.all([
+        db.seedBatches.where('id').anyOf(seedBatchIds).toArray(),
+        db.crops.where('id').anyOf(cropIds).toArray(),
+        db.plantingLogs.where('seedling_production_log_id').anyOf(seedlingLogIds).and(pl => pl.is_deleted !== 1).toArray(),
+        db.harvestLogs.filter(hl => hl.is_deleted !== 1).toArray(), // Fetched broadly, then filtered
+        db.saleItems.filter(si => si.is_deleted !== 1).toArray() // Fetched broadly, then filtered
+    ]);
+
+    const cropMap = new Map(crops.map(c => [c.id, c]));
+    const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb]));
+
     const reportItems: SeedlingLifecycleReportItem[] = [];
 
     for (const sl of seedlingLogs) {
-        const crop = await db.crops.get(sl.crop_id);
-        const seedBatch = await db.seedBatches.get(sl.seed_batch_id);
-        const plantingLog = await db.plantingLogs.where({ seedling_production_log_id: sl.id, is_deleted: 0 }).first();
+        const seedBatch = seedBatchMap.get(sl.seed_batch_id);
+        const crop = cropMap.get(sl.crop_id);
+        const plantingsFromThisSeedlingLog = plantingLogs.filter(pl => pl.seedling_production_log_id === sl.id);
+        const seedlingsTransplanted = plantingsFromThisSeedlingLog.reduce((sum, pl) => sum + (pl.quantity_planted || 0), 0);
         
-        let harvestsCount = 0;
-        let totalQuantityHarvested = 0;
-        let totalSalesValueFromHarvests = 0;
+        const harvestLogIdsFromThesePlantings = plantingsFromThisSeedlingLog.flatMap(pl => 
+            harvestLogs.filter(hl => hl.planting_log_id === pl.id).map(hl => hl.id)
+        );
+        const totalHarvestedFromSeedlings = harvestLogs
+            .filter(hl => harvestLogIdsFromThesePlantings.includes(hl.id))
+            .reduce((sum, hl) => sum + (hl.quantity_harvested || 0), 0);
 
-        if (plantingLog) {
-            const harvestsForThisPlanting = await db.harvestLogs.where({ planting_log_id: plantingLog.id, is_deleted: 0 }).toArray();
-            harvestsCount = harvestsForThisPlanting.length;
-            harvestsForThisPlanting.forEach(h => {
-                totalQuantityHarvested += h.quantity_harvested;
-            });
-
-            const harvestLogIds = harvestsForThisPlanting.map(h => h.id);
-            if (harvestLogIds.length > 0) {
-                const saleItemsForTheseHarvests = await db.saleItems
-                    .where('harvest_log_id').anyOf(harvestLogIds)
-                    .and(si => si.is_deleted !== 1)
-                    .toArray();
-                
-                saleItemsForTheseHarvests.forEach(si => {
-                    let itemTotal = si.quantity_sold * si.price_per_unit;
-                    if (si.discount_type && si.discount_value) {
-                        if (si.discount_type === 'Amount') itemTotal -= si.discount_value;
-                        else if (si.discount_type === 'Percentage') itemTotal -= itemTotal * (si.discount_value / 100);
-                    }
-                    totalSalesValueFromHarvests += Math.max(0, itemTotal);
-                });
-            }
-        }
+        const saleItemsForTheseHarvests = saleItems.filter(si => si.harvest_log_id && harvestLogIdsFromThesePlantings.includes(si.harvest_log_id));
+        const totalSoldFromSeedlings = saleItemsForTheseHarvests.reduce((sum, si) => sum + (si.quantity_sold || 0), 0);
 
         reportItems.push({
-            seedlingLogId: sl.id,
+            seedBatchId: sl.seed_batch_id,
+            seedBatchCode: seedBatch?.batch_code || 'N/A',
+            cropName: crop?.name || 'N/A',
             sowingDate: new Date(sl.sowing_date).toLocaleDateString(),
-            cropName: crop?.name,
-            seedBatchCode: seedBatch?.batch_code,
-            quantitySown: sl.quantity_sown_value,
-            sowingUnit: sl.sowing_unit_from_batch,
-            actualSeedlingsProduced: sl.actual_seedlings_produced,
+            quantitySownDisplay: `${sl.quantity_sown_value} ${sl.sowing_unit_from_batch || 'units'}`,
+            seedlingsProduced: sl.actual_seedlings_produced,
+            seedlingsTransplanted,
+            totalHarvestedFromSeedlings,
+            totalSoldFromSeedlings,
             currentSeedlingsAvailable: sl.current_seedlings_available,
-            plantingLogId: plantingLog?.id,
-            plantingDate: plantingLog ? new Date(plantingLog.planting_date).toLocaleDateString() : undefined,
-            quantityPlanted: plantingLog?.quantity_planted,
-            harvestsCount,
-            totalQuantityHarvested,
-            totalSalesValueFromHarvests,
             notes: sl.notes
         });
     }
@@ -1105,50 +1105,61 @@ export async function exportSeedlingLifecycleToPDF(filters?: DateRangeFilters): 
     try {
         const reportData = await getSeedlingLifecycleReportData(filters);
         if (reportData.length === 0) {
-            alert("No seedling lifecycle data for PDF report.");
+            alert("No seedling lifecycle data available for PDF report with selected filters.");
             return;
         }
         const pdfDoc = await PDFDocument.create();
+        pdfDoc.registerFontkit(fontkit);
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
-        const margin = 30; // Smaller margin for more data
+        const margin = 40;
         const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos);
-        yPos.y -= 5;
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        const tableHeaders = ["Sowing Date", "Crop", "Batch", "Sown", "Produced", "Available", "Planted", "Harvests", "Total Harvested", "Sales Value"];
-        const columnWidths = [55, 70, 60, 50, 50, 50, 50, 45, 65, 65]; // Adjusted for more columns
-        
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
+        yPos.y -= 10;
+
+        const tableHeaders = ["Crop", "Batch", "Sown", "Sown Qty", "Produced", "Transplanted", "Harvested", "Sold", "Remaining Seedlings"];
+        const columnWidths = [70, 70, 60, 50, 50, 60, 60, 50, 70];
+
         const tableData = reportData.map(item => [
-            item.sowingDate, item.cropName || '-', item.seedBatchCode || '-',
-            `${item.quantitySown || 0} ${item.sowingUnit || ''}`,
-            item.actualSeedlingsProduced || 0, item.currentSeedlingsAvailable || 0,
-            item.quantityPlanted || (item.plantingLogId ? 0 : '-'), // Show 0 if planted but no qty, '-' if not planted
-            item.harvestsCount, item.totalQuantityHarvested, `€${item.totalSalesValueFromHarvests.toFixed(2)}`
+            item.cropName,
+            item.seedBatchCode,
+            item.sowingDate,
+            `${item.quantitySownDisplay}`,
+            item.seedlingsProduced,
+            item.seedlingsTransplanted,
+            item.totalHarvestedFromSeedlings,
+            item.totalSoldFromSeedlings,
+            item.currentSeedlingsAvailable
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, fontSize: 7, headerFontSize: 8, lineHeight: 10 });
-        
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont });
+
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        saveAs(blob, `Hurvesthub_Seedling_Lifecycle_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+        const now = new Date();
+        const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        saveAs(blob, `Hurvesthub_Seedling_Lifecycle_Report_${dateStamp}.pdf`);
     } catch (error) {
         console.error("Failed to generate seedling lifecycle PDF:", error);
-        alert(`Error generating PDF: ${error instanceof Error ? error.message : String(error)}`);
+        alert(`Error generating seedling lifecycle PDF: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
 function convertSeedlingLifecycleToCSV(data: SeedlingLifecycleReportItem[]): string {
-    const headers = ["Sowing Date", "Crop", "Seed Batch", "Qty Sown", "Sowing Unit", "Seedlings Produced", "Seedlings Available", "Planting Date", "Qty Planted", "Harvests Count", "Total Qty Harvested", "Total Sales Value (€)", "Seedling Log ID", "Planting Log ID", "Notes"];
+    const headers = ["Crop Name", "Seed Batch Code", "Sowing Date", "Quantity Sown", "Seedlings Produced", "Seedlings Transplanted", "Total Harvested", "Total Sold", "Current Seedlings Available", "Notes"];
     const csvRows = [headers.join(',')];
     data.forEach(item => {
         const row = [
-            `"${item.sowingDate}"`, `"${item.cropName || ''}"`, `"${item.seedBatchCode || ''}"`,
-            item.quantitySown || 0, `"${item.sowingUnit || ''}"`, item.actualSeedlingsProduced || 0,
-            item.currentSeedlingsAvailable || 0, `"${item.plantingDate || ''}"`, item.quantityPlanted || '',
-            item.harvestsCount, item.totalQuantityHarvested, item.totalSalesValueFromHarvests.toFixed(2),
-            `"${item.seedlingLogId}"`, `"${item.plantingLogId || ''}"`, `"${(item.notes || '').replace(/"/g, '""')}"`
+            `"${item.cropName || ''}"`, `"${item.seedBatchCode}"`, `"${item.sowingDate}"`,
+            `"${item.quantitySownDisplay}"`, item.seedlingsProduced, item.seedlingsTransplanted,
+            item.totalHarvestedFromSeedlings, item.totalSoldFromSeedlings, item.currentSeedlingsAvailable,
+            `"${(item.notes || '').replace(/"/g, '""')}"`
         ];
         csvRows.push(row.join(','));
     });
@@ -1158,20 +1169,14 @@ function convertSeedlingLifecycleToCSV(data: SeedlingLifecycleReportItem[]): str
 export async function exportSeedlingLifecycleToCSV(filters?: DateRangeFilters): Promise<void> {
     try {
         const reportData = await getSeedlingLifecycleReportData(filters);
-        if (reportData.length === 0) {
-            alert("No seedling lifecycle data for CSV export.");
-            return;
-        }
+        if (reportData.length === 0) { alert("No data for Seedling Lifecycle CSV."); return; }
         const csvData = convertSeedlingLifecycleToCSV(reportData);
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, `Hurvesthub_Seedling_Lifecycle_Report_${new Date().toISOString().split('T')[0]}.csv`);
-    } catch (error) {
-        console.error("Failed to export seedling lifecycle to CSV:", error);
-        alert(`Error exporting to CSV: ${error instanceof Error ? error.message : String(error)}`);
-    }
+        saveAs(blob, `Hurvesthub_Seedling_Lifecycle_${new Date().toISOString().split('T')[0]}.csv`);
+    } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
 }
 
-// --- Organic Compliance Report ---
+
 export interface OrganicComplianceReportItem {
     seedBatchId: string;
     batchCode: string;
@@ -1192,28 +1197,33 @@ async function getOrganicComplianceReportData(filters?: DateRangeFilters): Promi
     }
     const seedBatches = await seedBatchesQuery.toArray();
     const cropIds = seedBatches.map(sb => sb.crop_id).filter(id => id) as string[];
-    const crops = await db.crops.where('id').anyOf(cropIds).toArray();
+    const supplierIds = seedBatches.map(sb => sb.supplier_id).filter(id => id) as string[];
+    
+    const [crops, suppliers] = await Promise.all([
+        db.crops.where('id').anyOf(cropIds).toArray(),
+        db.suppliers.where('id').anyOf(supplierIds).toArray()
+    ]);
     const cropMap = new Map(crops.map(c => [c.id, c]));
+    const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
 
     return seedBatches.map(sb => ({
         seedBatchId: sb.id,
         batchCode: sb.batch_code,
         cropName: cropMap.get(sb.crop_id)?.name,
-        supplier: sb.supplier,
+        supplier: sb.supplier_id ? supplierMap.get(sb.supplier_id) : undefined,
         purchaseDate: sb.purchase_date ? new Date(sb.purchase_date).toLocaleDateString() : undefined,
         organicStatus: sb.organic_status,
         notes: sb.notes
-    })).sort((a,b) => (a.cropName || '').localeCompare(b.cropName || '') || (a.purchaseDate || '').localeCompare(b.purchaseDate || ''));
+    })).sort((a,b) => (a.cropName || '').localeCompare(b.cropName || '') || a.batchCode.localeCompare(b.batchCode));
 }
 
 function convertOrganicComplianceToCSV(data: OrganicComplianceReportItem[]): string {
-    const headers = ["Crop Name", "Seed Batch Code", "Supplier", "Purchase Date", "Organic Status", "Notes", "Seed Batch ID"];
+    const headers = ["Crop Name", "Batch Code", "Supplier", "Purchase Date", "Organic Status", "Notes"];
     const csvRows = [headers.join(',')];
     data.forEach(item => {
         const row = [
             `"${item.cropName || ''}"`, `"${item.batchCode}"`, `"${item.supplier || ''}"`,
-            `"${item.purchaseDate || ''}"`, `"${item.organicStatus || ''}"`,
-            `"${(item.notes || '').replace(/"/g, '""')}"`, `"${item.seedBatchId}"`
+            `"${item.purchaseDate || ''}"`, `"${item.organicStatus || ''}"`, `"${(item.notes || '').replace(/"/g, '""')}"`
         ];
         csvRows.push(row.join(','));
     });
@@ -1222,312 +1232,295 @@ function convertOrganicComplianceToCSV(data: OrganicComplianceReportItem[]): str
 export async function exportOrganicComplianceToCSV(filters?: DateRangeFilters): Promise<void> {
     try {
         const reportData = await getOrganicComplianceReportData(filters);
-        if (reportData.length === 0) { alert("No data for Organic Compliance Report."); return; }
+        if (reportData.length === 0) { alert("No data for Organic Compliance CSV."); return; }
         const csvData = convertOrganicComplianceToCSV(reportData);
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, `Hurvesthub_Organic_Compliance_Report_${new Date().toISOString().split('T')[0]}.csv`);
+        saveAs(blob, `Hurvesthub_Organic_Compliance_${new Date().toISOString().split('T')[0]}.csv`);
     } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
 }
 
 export async function exportOrganicComplianceToPDF(filters?: DateRangeFilters): Promise<void> {
     try {
         const reportData = await getOrganicComplianceReportData(filters);
-        if (reportData.length === 0) { alert("No data for Organic Compliance PDF Report."); return; }
-        
+        if (reportData.length === 0) {
+            alert("No organic compliance data available for PDF report with selected filters.");
+            return;
+        }
         const pdfDoc = await PDFDocument.create();
+        pdfDoc.registerFontkit(fontkit);
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos);
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         yPos.y -= 10;
 
         const tableHeaders = ["Crop", "Batch Code", "Supplier", "Purchase Date", "Organic Status", "Notes"];
-        const columnWidths = [100, 80, 100, 70, 100, 100];
+        const columnWidths = [100, 100, 100, 80, 100, 100]; 
         
         const tableData = reportData.map(item => [
-            item.cropName || '-',
+            item.cropName || '',
             item.batchCode,
-            item.supplier || '-',
-            item.purchaseDate || '-',
-            item.organicStatus || '-',
-            item.notes || '-'
+            item.supplier || '',
+            item.purchaseDate || '',
+            item.organicStatus || '',
+            item.notes || ''
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin });
-        
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont });
+
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        saveAs(blob, `Hurvesthub_Organic_Compliance_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-    } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
+        const now = new Date();
+        const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        saveAs(blob, `Hurvesthub_Organic_Compliance_Report_${dateStamp}.pdf`);
+    } catch (error) {
+        console.error("Failed to generate organic compliance PDF:", error);
+        alert(`Error generating organic compliance PDF: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
 
-// --- Input Item Usage Ledger ---
+
 export interface CultivationUsageDetail {
-    cultivationLogId: string;
     activityDate: string;
     activityType: string;
+    cropName?: string;
     plotAffected?: string;
-    quantityUsed?: number;
-    notes?: string; // Cultivation log notes
+    quantityUsed: number;
+    quantityUnit?: string;
 }
 export interface InputItemUsageLedgerDataItem {
     itemId: string;
     itemName: string;
     itemType?: string;
     initialQuantity?: number;
-    quantityUnit?: string;
-    purchaseDate?: string;
-    totalUsed: number;
     currentQuantity?: number;
+    quantityUnit?: string;
     usageDetails: CultivationUsageDetail[];
 }
 
 export async function getInputItemUsageLedgerData(filters?: { itemId?: string }): Promise<InputItemUsageLedgerDataItem[]> {
-    const reportItems: InputItemUsageLedgerDataItem[] = [];
-    let itemsToProcess: (InputInventory | SeedBatch)[] = [];
+    if (!filters?.itemId) return [];
 
-    if (filters?.itemId) {
-        const inputItem = await db.inputInventory.get(filters.itemId);
-        if (inputItem && inputItem.is_deleted !== 1) itemsToProcess.push(inputItem);
-        else {
-            const seedBatchItem = await db.seedBatches.get(filters.itemId);
-            if (seedBatchItem && seedBatchItem.is_deleted !== 1) itemsToProcess.push(seedBatchItem);
-        }
-        if (itemsToProcess.length === 0) return []; // Item not found or deleted
-    } else {
-        const inputs = await db.inputInventory.filter(i => i.is_deleted !== 1).toArray();
-        const seedBatches = await db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray();
-        itemsToProcess = [...inputs, ...seedBatches];
-    }
+    const inputItem = await db.inputInventory.get(filters.itemId);
+    if (!inputItem || inputItem.is_deleted === 1) return [];
+
+    const cultivationLogs = await db.cultivationLogs
+        .where('input_inventory_id').equals(filters.itemId)
+        .and(log => log.is_deleted !== 1)
+        .sortBy('activity_date');
+
+    const plantingLogIds = cultivationLogs.map(cl => cl.planting_log_id).filter(id => id) as string[];
+    const uniquePlantingLogIds = [...new Set(plantingLogIds)];
     
-    const cropCache = new Map<string, Crop>();
+    const plantingLogs = await db.plantingLogs.where('id').anyOf(uniquePlantingLogIds).toArray();
+    const seedBatchIds = plantingLogs.map(pl => pl.seed_batch_id).filter(id => id) as string[];
+    const uniqueSeedBatchIds = [...new Set(seedBatchIds)];
 
-    for (const item of itemsToProcess) {
-        const usageDetails: CultivationUsageDetail[] = [];
-        let totalUsed = 0;
-        let itemName = '';
-        let itemType = '';
+    const seedBatches = await db.seedBatches.where('id').anyOf(uniqueSeedBatchIds).toArray();
+    const cropIdsFromSeedBatches = seedBatches.map(sb => sb.crop_id).filter(id => id) as string[];
+    
+    // If cultivation logs can link directly to crops (not currently in schema but for future proofing)
+    // const cropIdsFromCultivation = cultivationLogs.map(cl => cl.crop_id).filter(id => id) as string[];
+    // const allCropIds = [...new Set([...cropIdsFromSeedBatches, ...cropIdsFromCultivation])];
+    const allCropIds = [...new Set(cropIdsFromSeedBatches)];
 
-        if ('batch_code' in item) { // It's a SeedBatch
-            itemType = 'Seed Batch';
-            let crop = cropCache.get(item.crop_id);
-            if (!crop) {
-                crop = await db.crops.get(item.crop_id);
-                if (crop) cropCache.set(item.crop_id, crop);
-            }
-            itemName = `${crop?.name || 'Unknown Crop'} Seeds (Batch: ${item.batch_code})`;
-            // For seed batches, usage is indirect via SeedlingProductionLog then PlantingLog then CultivationLog (if inputs used on seedlings)
-            // Or direct via PlantingLog (direct sowing) then CultivationLog.
-            // This report focuses on InputInventory usage in CultivationLogs. Seed batch usage is more complex.
-            // For now, we'll assume this report is primarily for InputInventory items.
-            // To include seed batch usage, we'd need to trace through planting/seedling logs.
-        } else { // It's an InputInventory
-            itemName = item.name;
-            itemType = item.type || 'General Input';
-            const cultivationLogs = await db.cultivationLogs
-                .where({ input_inventory_id: item.id, is_deleted: 0 })
-                .toArray();
 
-            for (const log of cultivationLogs) {
-                const qtyUsed = log.input_quantity_used || 0;
-                totalUsed += qtyUsed;
-                usageDetails.push({
-                    cultivationLogId: log.id,
-                    activityDate: new Date(log.activity_date).toLocaleDateString(),
-                    activityType: log.activity_type,
-                    plotAffected: log.plot_affected,
-                    quantityUsed: qtyUsed,
-                    notes: log.notes
-                });
-            }
-        }
-        
-        // Only add if it's an InputInventory item for this version of the report
-        if (!('batch_code' in item)) {
-            reportItems.push({
-                itemId: item.id,
-                itemName: itemName,
-                itemType: itemType,
-                initialQuantity: item.initial_quantity,
-                quantityUnit: item.quantity_unit,
-                purchaseDate: item.purchase_date ? new Date(item.purchase_date).toLocaleDateString() : undefined,
-                totalUsed: totalUsed,
-                currentQuantity: item.current_quantity,
-                usageDetails: usageDetails.sort((a,b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime()),
-            });
-        }
-    }
-    return reportItems.sort((a,b) => a.itemName.localeCompare(b.itemName));
+    const crops = await db.crops.where('id').anyOf(allCropIds).toArray();
+    
+    const cropMap = new Map(crops.map(c => [c.id, c]));
+    const plantingLogMap = new Map(plantingLogs.map(pl => [pl.id, pl]));
+    const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb]));
+
+    const usageDetails: CultivationUsageDetail[] = cultivationLogs.map(cl => {
+        const pLog = cl.planting_log_id ? plantingLogMap.get(cl.planting_log_id) : undefined;
+        const sBatch = pLog?.seed_batch_id ? seedBatchMap.get(pLog.seed_batch_id) : undefined;
+        const crop = sBatch?.crop_id ? cropMap.get(sBatch.crop_id) : undefined;
+        // If direct crop_id on cultivation log: const crop = cl.crop_id ? cropMap.get(cl.crop_id) : undefined;
+
+        return {
+            activityDate: new Date(cl.activity_date).toLocaleDateString(),
+            activityType: cl.activity_type,
+            cropName: crop?.name,
+            plotAffected: cl.plot_affected || pLog?.plot_affected,
+            quantityUsed: cl.input_quantity_used || 0,
+            quantityUnit: cl.input_quantity_unit
+        };
+    });
+
+    return [{
+        itemId: inputItem.id,
+        itemName: inputItem.name,
+        itemType: inputItem.type,
+        initialQuantity: inputItem.initial_quantity,
+        currentQuantity: inputItem.current_quantity,
+        quantityUnit: inputItem.quantity_unit,
+        usageDetails
+    }];
 }
 
 
 export async function exportInputItemUsageLedgerToPDF(filters?: { itemId?: string }): Promise<void> {
-    try {
-        const reportData = await getInputItemUsageLedgerData(filters);
-        if (reportData.length === 0) {
-            alert("No data for Input Item Usage Ledger PDF.");
-            return;
+    if (!filters?.itemId) { alert("No item selected for ledger."); return; }
+    const ledgerData = await getInputItemUsageLedgerData(filters);
+    if (ledgerData.length === 0) { alert("No usage data found for the selected item."); return; }
+
+    const item = ledgerData[0];
+    const pdfDoc = await PDFDocument.create();
+    let page = pdfDoc.addPage();
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+    const margin = 30;
+    let yPos = pageHeight - margin;
+
+    const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+    const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+    const mainFont = await pdfDoc.embedFont(fontBytes);
+    const boldFont = await pdfDoc.embedFont(boldFontBytes);
+
+    const drawTextLine = (text: string, currentY: number, size: number, font: PDFFont = mainFont, xOffset: number = 0) => {
+        page.drawText(text, { x: margin + xOffset, y: currentY, font, size, color: rgb(0,0,0) });
+        return currentY - size - 4; // Return new Y
+    };
+    
+    yPos = drawTextLine(`Usage Ledger for: ${item.itemName} (${item.itemId})`, yPos, 14, boldFont);
+    yPos = drawTextLine(`Type: ${item.itemType || 'N/A'}`, yPos, 10);
+    yPos = drawTextLine(`Initial Quantity: ${item.initialQuantity || 0} ${item.quantityUnit || ''}`, yPos, 10);
+    yPos = drawTextLine(`Current Quantity: ${item.currentQuantity || 0} ${item.quantityUnit || ''}`, yPos, 10);
+    yPos -= 10; // Extra space
+
+    const useHeaders = ["Date", "Activity", "Crop", "Plot", "Qty Used"];
+    const useColWidths = [80, 120, 100, 100, 80]; // Adjusted for typical content
+
+    // Draw headers for usage details
+    let currentX = margin;
+    useHeaders.forEach((header, idx) => {
+        page.drawText(header, { x: currentX, y: yPos, font: boldFont, size: 9, color: rgb(0,0,0) });
+        currentX += useColWidths[idx];
+    });
+    yPos -= 12;
+    page.drawLine({start: {x: margin, y: yPos}, end: {x: pageWidth - margin, y: yPos}, thickness: 0.5});
+    yPos -= 2;
+
+
+    for (const detail of item.usageDetails) {
+        if (yPos < margin + 40) { // Check for new page
+            page = pdfDoc.addPage();
+            yPos = pageHeight - margin;
+            currentX = margin;
+            useHeaders.forEach((header, idx) => { // Redraw headers on new page
+                page.drawText(header, { x: currentX, y: yPos, font: boldFont, size: 9 });
+                currentX += useColWidths[idx];
+            });
+            yPos -= 12;
+            page.drawLine({start: {x: margin, y: yPos}, end: {x: pageWidth - margin, y: yPos}, thickness: 0.5});
+            yPos -= 2;
         }
 
-        const pdfDoc = await PDFDocument.create();
-        const mainFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-        const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-        const margin = 40;
-        let page = pdfDoc.addPage();
-        let { width: pageWidth, height: pageHeight } = page.getSize();
-        let y = pageHeight - margin;
+        const detailRow = [
+            detail.activityDate,
+            detail.activityType,
+            detail.cropName || '-',
+            detail.plotAffected || '-',
+            `${detail.quantityUsed} ${detail.quantityUnit || ''}`
+        ];
+        currentX = margin;
+        let maxLinesInRow = 1;
+        const linesPerRowCell: string[][] = [];
 
-        const drawTextLine = (text: string, currentY: number, size: number, font: PDFFont = mainFont, xOffset: number = 0) => {
-            if (currentY < margin + size) { // Check for new page
-                page = pdfDoc.addPage();
-                ({ width: pageWidth, height: pageHeight } = page.getSize());
-                currentY = pageHeight - margin;
-            }
-            page.drawText(text, { x: margin + xOffset, y: currentY, font, size });
-            return currentY - (size * 1.2);
-        };
+        detailRow.forEach((cell, idx) => {
+            const lines = splitTextToFit(cell, useColWidths[idx] - 4, mainFont, 8);
+            linesPerRowCell.push(lines);
+            maxLinesInRow = Math.max(maxLinesInRow, lines.length);
+        });
         
-        for (const item of reportData) {
-            y = drawTextLine(`Ledger for: ${item.itemName}`, y, 14, boldFont);
-            y = drawTextLine(`Item ID: ${item.itemId}`, y, 10);
-            y = drawTextLine(`Type: ${item.itemType || 'N/A'}`, y, 10);
-            y = drawTextLine(`Purchase Date: ${item.purchaseDate || 'N/A'}`, y, 10);
-            y = drawTextLine(`Initial Quantity: ${item.initialQuantity || 0} ${item.quantityUnit || ''}`, y, 10);
-            y = drawTextLine(`Total Used: ${item.totalUsed} ${item.quantityUnit || ''}`, y, 10);
-            y = drawTextLine(`Current Quantity: ${item.currentQuantity || 0} ${item.quantityUnit || ''}`, y, 10);
-            y -= 10; // Extra space
+        const rowHeight = maxLinesInRow * 10;
+        if (yPos - rowHeight < margin) { /* re-check for new page with actual row height */ }
 
-            if (item.usageDetails.length > 0) {
-                y = drawTextLine("Usage Details:", y, 12, boldFont);
-                
-                // Table Headers for usage
-                const useHeaders = ["Date", "Activity", "Plot", "Qty Used", "Notes"];
-                const useColWidths = [70, 120, 100, 70, pageWidth - margin*2 - 70-120-100-70 -10]; // Last col takes remainder
-                let headerX = margin;
-                useHeaders.forEach((header, idx) => {
-                    page.drawText(header, {x: headerX, y, font: boldFont, size: 9});
-                    headerX += useColWidths[idx] + 5;
-                });
-                y -= 12;
 
-                for (const detail of item.usageDetails) {
-                    if (y < margin + 40) { // Check for new page before drawing row
-                        page = pdfDoc.addPage();
-                        ({ width: pageWidth, height: pageHeight } = page.getSize());
-                        y = pageHeight - margin;
-                        // Redraw item header if new page for same item
-                        y = drawTextLine(`Ledger for: ${item.itemName} (continued)`, y, 14, boldFont);
-                        y -=5;
-                        headerX = margin;
-                        useHeaders.forEach((header, idx) => { // Redraw headers on new page
-                            page.drawText(header, {x: headerX, y, font: boldFont, size: 9});
-                            headerX += useColWidths[idx] + 5;
-                        });
-                        y -= 12;
-                    }
-
-                    let cellX = margin;
-                    const detailRow = [
-                        detail.activityDate,
-                        detail.activityType,
-                        detail.plotAffected || '-',
-                        String(detail.quantityUsed || 0),
-                        detail.notes || '-'
-                    ];
-                    detailRow.forEach((cell, idx) => {
-                        const lines = splitTextToFit(cell, useColWidths[idx], mainFont, 8);
-                        let lineY = y;
-                        lines.forEach(l => {
-                             page.drawText(l, {x: cellX, y: lineY, font: mainFont, size: 8});
-                             lineY -= 9; // line height for 8pt font
-                        });
-                        if (idx === 0) y = lineY + 9 - (lines.length > 1 ? (lines.length * 9) : 12) ; // Adjust y based on max lines in first cell or fixed
-                        cellX += useColWidths[idx] + 5;
-                    });
-                     y -= (splitTextToFit(detailRow[4], useColWidths[4], mainFont, 8).length * 9) + 3; // Adjust Y based on notes height + padding
+        for (let lineIdx = 0; lineIdx < maxLinesInRow; lineIdx++) {
+            currentX = margin;
+            detailRow.forEach((_cell, cellIdx) => {
+                if (linesPerRowCell[cellIdx][lineIdx]) {
+                    page.drawText(linesPerRowCell[cellIdx][lineIdx], { x: currentX + 2, y: yPos - (lineIdx * 10), font: mainFont, size: 8 });
                 }
-            } else {
-                y = drawTextLine("No usage recorded.", y, 10);
-            }
-            y -= 20; // Space before next item
-             if (y < margin + 50 && reportData.indexOf(item) < reportData.length -1 ) { // Check for new page before next item
-                page = pdfDoc.addPage();
-                ({ width: pageWidth, height: pageHeight } = page.getSize());
-                y = pageHeight - margin;
-            }
+                currentX += useColWidths[cellIdx];
+            });
         }
-
-        const pdfBytes = await pdfDoc.save();
-        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        saveAs(blob, `Hurvesthub_InputItem_UsageLedger_${filters?.itemId || 'AllItems'}_${new Date().toISOString().split('T')[0]}.pdf`);
-
-    } catch (error) {
-        console.error("Failed to generate Input Item Usage Ledger PDF:", error);
-        alert(`Error generating PDF: ${error instanceof Error ? error.message : String(error)}`);
+        yPos -= rowHeight;
+        page.drawLine({start: {x: margin, y: yPos}, end: {x: pageWidth - margin, y: yPos}, thickness: 0.2, color: rgb(0.8,0.8,0.8)});
+        yPos -=2;
     }
+
+    const pdfBytes = await pdfDoc.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    saveAs(blob, `Hurvesthub_UsageLedger_${item.itemName.replace(/\s/g, '_')}.pdf`);
 }
 
 
-// --- Grouped Inventory Summary ---
 export interface GroupedInventoryItemReportData {
-    itemName: string; // e.g., "Tomato Seeds", "Fertilizer A"
-    itemType: string; // "Seed Batch" or specific input type
+    itemName: string;
+    itemType: string;
     totalCurrentQuantity: number;
-    quantityUnit: string;
-    numberOfBatchesOrItems: number; // Count of distinct seed batches or input items
-    detailsLink?: string; // Optional: link to a more detailed view or report
+    quantityUnit?: string; // Assume common unit or handle variations
+    totalValue: number; // Sum of (currentQuantity * costPerUnit)
 }
 
 export async function getGroupedInventorySummaryData(): Promise<GroupedInventoryItemReportData[]> {
-    const allInputs = await db.inputInventory.filter(i => i.is_deleted !== 1).toArray();
-    const allSeedBatches = await db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray();
-    const allCrops = await db.crops.filter(c => c.is_deleted !== 1).toArray();
-    const cropMap = new Map(allCrops.map(c => [c.id, c]));
+    const [allInputs, allSeedBatches, suppliers] = await Promise.all([
+        db.inputInventory.filter(i => i.is_deleted !== 1).toArray(),
+        db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
+        db.suppliers.filter(s => s.is_deleted !== 1).toArray()
+    ]);
+    const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
 
-    const groupedData: Record<string, GroupedInventoryItemReportData> = {};
+    const groupedMap = new Map<string, GroupedInventoryItemReportData>();
 
     allInputs.forEach(item => {
-        const key = `${item.name}_${item.type || 'General Input'}_${item.quantity_unit || 'units'}`;
-        if (!groupedData[key]) {
-            groupedData[key] = {
-                itemName: item.name,
-                itemType: item.type || 'General Input',
-                totalCurrentQuantity: 0,
-                quantityUnit: item.quantity_unit || 'units',
-                numberOfBatchesOrItems: 0,
-            };
+        const key = `${item.name}_${item.type || 'General Input'}`;
+        let entry = groupedMap.get(key);
+        if (!entry) {
+            entry = { itemName: item.name, itemType: item.type || 'General Input', totalCurrentQuantity: 0, quantityUnit: item.quantity_unit, totalValue: 0 };
+            groupedMap.set(key, entry);
         }
-        groupedData[key].totalCurrentQuantity += item.current_quantity || 0;
-        groupedData[key].numberOfBatchesOrItems += 1;
+        entry.totalCurrentQuantity += item.current_quantity || 0;
+        // Assuming total_purchase_cost is for initial_quantity. Need cost per unit.
+        const costPerUnit = (item.initial_quantity && item.total_purchase_cost && item.initial_quantity > 0) 
+                            ? item.total_purchase_cost / item.initial_quantity 
+                            : 0;
+        entry.totalValue += (item.current_quantity || 0) * costPerUnit;
+        if (!entry.quantityUnit && item.quantity_unit) entry.quantityUnit = item.quantity_unit; // Take first unit found
     });
 
     allSeedBatches.forEach(batch => {
-        const crop = cropMap.get(batch.crop_id);
-        const itemName = `${crop?.name || 'Unknown Crop'} Seeds`;
-        const key = `${itemName}_Seed Batch_${batch.quantity_unit || 'units'}`;
-        if (!groupedData[key]) {
-            groupedData[key] = {
-                itemName: itemName,
-                itemType: 'Seed Batch',
-                totalCurrentQuantity: 0,
-                quantityUnit: batch.quantity_unit || 'units',
-                numberOfBatchesOrItems: 0,
-            };
+        const key = `${batch.batch_code}_Seed Batch`; // Assuming batch_code is unique enough for grouping seeds
+        let entry = groupedMap.get(key);
+        if (!entry) {
+            entry = { itemName: batch.batch_code, itemType: 'Seed Batch', totalCurrentQuantity: 0, quantityUnit: batch.quantity_unit, totalValue: 0 };
+            groupedMap.set(key, entry);
         }
-        groupedData[key].totalCurrentQuantity += batch.current_quantity || 0;
-        groupedData[key].numberOfBatchesOrItems += 1; // Each batch is distinct
+        entry.totalCurrentQuantity += batch.current_quantity || 0;
+        const costPerUnit = (batch.initial_quantity && batch.total_purchase_cost && batch.initial_quantity > 0)
+                            ? batch.total_purchase_cost / batch.initial_quantity
+                            : 0;
+        entry.totalValue += (batch.current_quantity || 0) * costPerUnit;
+        if (!entry.quantityUnit && batch.quantity_unit) entry.quantityUnit = batch.quantity_unit;
     });
 
-    return Object.values(groupedData).sort((a,b) => a.itemName.localeCompare(b.itemName));
+    return Array.from(groupedMap.values()).sort((a,b) => a.itemName.localeCompare(b.itemName));
 }
+
 
 export async function exportGroupedInventorySummaryToPDF(): Promise<void> {
     try {
         const reportData = await getGroupedInventorySummaryData();
         if (reportData.length === 0) {
-            alert("No data for Grouped Inventory Summary PDF.");
+            alert("No grouped inventory data available for PDF report.");
             return;
         }
         const pdfDoc = await PDFDocument.create();
@@ -1536,114 +1529,106 @@ export async function exportGroupedInventorySummaryToPDF(): Promise<void> {
         const margin = 40;
         const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos);
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
         yPos.y -= 10;
-        page.drawText("Grouped Inventory Summary", { x: margin, y: yPos.y, font: await pdfDoc.embedFont(StandardFonts.HelveticaBold), size: 16});
-        yPos.y -= 20;
 
-
-        const tableHeaders = ["Item Name", "Type", "Total Current Qty", "Unit", "# Batches/Items"];
-        const columnWidths = [150, 100, 100, 80, 80];
+        const tableHeaders = ["Item Name", "Type", "Total Current Qty", "Unit", "Total Value (€)"];
+        const columnWidths = [150, 80, 80, 60, 100];
         
         const tableData = reportData.map(item => [
             item.itemName,
             item.itemType,
             item.totalCurrentQuantity,
-            item.quantityUnit,
-            item.numberOfBatchesOrItems
+            item.quantityUnit || '',
+            `€${item.totalValue.toFixed(2)}`
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin });
-        
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont });
+
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        saveAs(blob, `Hurvesthub_Grouped_Inventory_Summary_${new Date().toISOString().split('T')[0]}.pdf`);
-
+        const now = new Date();
+        const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        saveAs(blob, `Hurvesthub_Grouped_Inventory_Summary_${dateStamp}.pdf`);
     } catch (error) {
-        console.error("Failed to generate Grouped Inventory Summary PDF:", error);
+        console.error("Failed to generate grouped inventory summary PDF:", error);
         alert(`Error generating PDF: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
 
-// --- Detailed Input Usage Report ---
+
 export interface DetailedInputUsageReportItem {
-    cultivationLogId: string;
     activityDate: string;
+    inputName: string;
     activityType: string;
-    inputName: string; // Name of the InputInventory item
-    inputType?: string;
-    quantityUsed?: number;
+    cropName?: string;
+    plotAffected?: string;
+    quantityUsed: number;
     quantityUnit?: string;
-    plantingLogId: string;
-    cropName?: string; // From PlantingLog -> SeedBatch -> Crop
-    plotAffected?: string; // From CultivationLog or PlantingLog
-    notes?: string; // CultivationLog notes
+    notes?: string; // from cultivation log
 }
 
 export async function getDetailedInputUsageData(filters?: DateRangeFilters): Promise<DetailedInputUsageReportItem[]> {
-    let cultivationLogsQuery = db.cultivationLogs.filter(cl => cl.is_deleted !== 1 && !!cl.input_inventory_id); // Only logs that used an input
+    let cultivationLogsQuery = db.cultivationLogs.filter(cl => cl.is_deleted !== 1 && cl.input_inventory_id != null);
+
     if (filters?.startDate) {
         cultivationLogsQuery = cultivationLogsQuery.and(cl => cl.activity_date >= filters.startDate!);
     }
     if (filters?.endDate) {
         cultivationLogsQuery = cultivationLogsQuery.and(cl => cl.activity_date <= filters.endDate!);
     }
-    const cultivationLogs = await cultivationLogsQuery.toArray();
+    const cultivationLogs = await cultivationLogsQuery.sortBy('activity_date');
 
-    const inputInventoryIds = cultivationLogs.map(cl => cl.input_inventory_id).filter(id => id) as string[];
-    const plantingLogIds = cultivationLogs.map(cl => cl.planting_log_id).filter(id => id) as string[];
-
-    const [inputInventories, plantingLogs, seedBatches, crops] = await Promise.all([
+    const inputInventoryIds = [...new Set(cultivationLogs.map(cl => cl.input_inventory_id).filter(id => id) as string[])];
+    const plantingLogIds = [...new Set(cultivationLogs.map(cl => cl.planting_log_id).filter(id => id) as string[])];
+    
+    const [inputInventoryItems, plantingLogs] = await Promise.all([
         db.inputInventory.where('id').anyOf(inputInventoryIds).toArray(),
-        db.plantingLogs.where('id').anyOf(plantingLogIds).toArray(),
-        db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(), // Fetch all for linking
-        db.crops.filter(c => c.is_deleted !== 1).toArray() // Fetch all for linking
+        db.plantingLogs.where('id').anyOf(plantingLogIds).toArray()
     ]);
+    
+    const seedBatchIds = [...new Set(plantingLogs.map(pl => pl.seed_batch_id).filter(id => id) as string[])];
+    const seedBatches = await db.seedBatches.where('id').anyOf(seedBatchIds).toArray();
+    const cropIds = [...new Set(seedBatches.map(sb => sb.crop_id).filter(id => id) as string[])];
+    const crops = await db.crops.where('id').anyOf(cropIds).toArray();
 
-    const inputMap = new Map(inputInventories.map(i => [i.id, i]));
-    const plantingMap = new Map(plantingLogs.map(p => [p.id, p]));
+    const inputMap = new Map(inputInventoryItems.map(i => [i.id, i]));
+    const plantingLogMap = new Map(plantingLogs.map(pl => [pl.id, pl]));
     const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb]));
     const cropMap = new Map(crops.map(c => [c.id, c]));
 
-    const reportItems: DetailedInputUsageReportItem[] = [];
-    for (const cl of cultivationLogs) {
-        const input = inputMap.get(cl.input_inventory_id!);
-        const plantingLog = plantingMap.get(cl.planting_log_id);
-        let cropName: string | undefined;
-        if (plantingLog && plantingLog.seed_batch_id) {
-            const seedBatch = seedBatchMap.get(plantingLog.seed_batch_id);
-            if (seedBatch) {
-                const crop = cropMap.get(seedBatch.crop_id);
-                cropName = crop?.name;
-            }
-        }
+    return cultivationLogs.map(cl => {
+        const inputItem = cl.input_inventory_id ? inputMap.get(cl.input_inventory_id) : undefined;
+        const pLog = cl.planting_log_id ? plantingLogMap.get(cl.planting_log_id) : undefined;
+        const sBatch = pLog?.seed_batch_id ? seedBatchMap.get(pLog.seed_batch_id) : undefined;
+        const crop = sBatch?.crop_id ? cropMap.get(sBatch.crop_id) : undefined;
 
-        reportItems.push({
-            cultivationLogId: cl.id,
+        return {
             activityDate: new Date(cl.activity_date).toLocaleDateString(),
+            inputName: inputItem?.name || 'Unknown Input',
             activityType: cl.activity_type,
-            inputName: input?.name || 'Unknown Input',
-            inputType: input?.type,
-            quantityUsed: cl.input_quantity_used,
-            quantityUnit: cl.input_quantity_unit || input?.quantity_unit,
-            plantingLogId: cl.planting_log_id,
-            cropName: cropName || (plantingLog ? 'N/A (No Seed Batch)' : 'N/A (No Planting Log)'),
-            plotAffected: cl.plot_affected || plantingLog?.plot_affected,
+            cropName: crop?.name,
+            plotAffected: cl.plot_affected || pLog?.plot_affected,
+            quantityUsed: cl.input_quantity_used || 0,
+            quantityUnit: cl.input_quantity_unit || inputItem?.quantity_unit,
             notes: cl.notes
-        });
-    }
-    return reportItems.sort((a,b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime() || a.inputName.localeCompare(b.inputName));
+        };
+    }).sort((a,b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime());
 }
 
 function convertDetailedInputUsageToCSV(data: DetailedInputUsageReportItem[]): string {
-  const headers = ["Activity Date", "Activity Type", "Input Name", "Input Type", "Qty Used", "Unit", "Crop Name", "Plot Affected", "Cultivation Notes", "Cultivation Log ID", "Planting Log ID"];
+  const headers = ["Activity Date", "Input Name", "Activity Type", "Crop Name", "Plot Affected", "Quantity Used", "Unit", "Notes"];
   const csvRows = [headers.join(',')];
   data.forEach(item => {
     const row = [
-      `"${item.activityDate}"`, `"${item.activityType}"`, `"${item.inputName}"`, `"${item.inputType || ''}"`,
-      item.quantityUsed || 0, `"${item.quantityUnit || ''}"`, `"${item.cropName || ''}"`,
-      `"${item.plotAffected || ''}"`, `"${(item.notes || '').replace(/"/g, '""')}"`,
-      `"${item.cultivationLogId}"`, `"${item.plantingLogId}"`
+      `"${item.activityDate}"`, `"${item.inputName}"`, `"${item.activityType}"`,
+      `"${item.cropName || ''}"`, `"${item.plotAffected || ''}"`, item.quantityUsed,
+      `"${item.quantityUnit || ''}"`, `"${(item.notes || '').replace(/"/g, '""')}"`
     ];
     csvRows.push(row.join(','));
   });
@@ -1653,7 +1638,7 @@ function convertDetailedInputUsageToCSV(data: DetailedInputUsageReportItem[]): s
 export async function exportDetailedInputUsageToCSV(filters?: DateRangeFilters): Promise<void> {
     try {
         const reportData = await getDetailedInputUsageData(filters);
-        if (reportData.length === 0) { alert("No detailed input usage data for CSV."); return; }
+        if (reportData.length === 0) { alert("No data for Detailed Input Usage CSV."); return; }
         const csvData = convertDetailedInputUsageToCSV(reportData);
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
         saveAs(blob, `Hurvesthub_Detailed_Input_Usage_${new Date().toISOString().split('T')[0]}.csv`);
@@ -1662,60 +1647,66 @@ export async function exportDetailedInputUsageToCSV(filters?: DateRangeFilters):
 export async function exportDetailedInputUsageToPDF(filters?: DateRangeFilters): Promise<void> {
     try {
         const reportData = await getDetailedInputUsageData(filters);
-        if (reportData.length === 0) { alert("No detailed input usage data for PDF."); return; }
-
+        if (reportData.length === 0) {
+            alert("No detailed input usage data available for PDF report with selected filters.");
+            return;
+        }
         const pdfDoc = await PDFDocument.create();
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
-        const margin = 35; // Slightly smaller margin
+        const margin = 40;
         const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos);
-        yPos.y -= 5;
-        page.drawText("Detailed Input Usage Report", { x: margin, y: yPos.y, font: await pdfDoc.embedFont(StandardFonts.HelveticaBold), size: 16});
-        yPos.y -= 20;
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        const tableHeaders = ["Date", "Activity", "Input", "Type", "Qty Used", "Unit", "Crop", "Plot"];
-        const columnWidths = [60, 90, 100, 70, 50, 40, 80, 70]; 
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
+        yPos.y -= 10;
+
+        const tableHeaders = ["Date", "Input Item", "Activity", "Crop", "Plot", "Qty Used", "Unit"];
+        const columnWidths = [70, 100, 80, 80, 70, 50, 50];
         
         const tableData = reportData.map(item => [
             item.activityDate,
-            item.activityType,
             item.inputName,
-            item.inputType || '-',
-            item.quantityUsed !== undefined ? String(item.quantityUsed) : '-',
-            item.quantityUnit || '-',
-            item.cropName || '-',
-            item.plotAffected || '-'
-            // item.notes could be added if space allows or in a sub-row
+            item.activityType,
+            item.cropName || '',
+            item.plotAffected || '',
+            item.quantityUsed,
+            item.quantityUnit
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, fontSize: 7, headerFontSize: 8, lineHeight: 10 });
-        
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont });
+
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        saveAs(blob, `Hurvesthub_Detailed_Input_Usage_${new Date().toISOString().split('T')[0]}.pdf`);
-    } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
+        const now = new Date();
+        const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        saveAs(blob, `Hurvesthub_Detailed_Input_Usage_Report_${dateStamp}.pdf`);
+    } catch (error) {
+        console.error("Failed to generate detailed input usage PDF:", error);
+        alert(`Error generating PDF: ${error instanceof Error ? error.message : String(error)}`);
+    }
 }
 
 
-// --- Seed Source Declaration Report ---
 export interface SeedSourceDeclarationReportItem {
     cropName: string;
     variety?: string;
     seedBatchCode: string;
     supplier?: string;
     purchaseDate?: string;
-    organicStatus?: string; // "Certified Organic", "Untreated", "GMO", "Non-GMO", "Pelleted" etc.
-    lotNumber?: string; // Often part of batch code or a separate field if available
-    originCountry?: string; // If available
-    conformityDeclarationAvailable: boolean; // e.g., a check if docs exist
-    notes?: string; // Seed batch notes
+    organicStatus?: string; 
+    lotNumber?: string; 
+    originCountry?: string; 
+    conformityDeclarationAvailable: boolean; 
+    notes?: string; 
 }
 
 export async function getSeedSourceDeclarationData(filters?: DateRangeFilters): Promise<SeedSourceDeclarationReportItem[]> {
     let seedBatchesQuery = db.seedBatches.filter(sb => sb.is_deleted !== 1);
-    // Apply date filters if provided (e.g., filter by purchase_date of seed batches)
     if (filters?.startDate) {
         seedBatchesQuery = seedBatchesQuery.and(sb => !!sb.purchase_date && sb.purchase_date >= filters.startDate!);
     }
@@ -1724,8 +1715,14 @@ export async function getSeedSourceDeclarationData(filters?: DateRangeFilters): 
     }
     const seedBatches = await seedBatchesQuery.toArray();
     const cropIds = seedBatches.map(sb => sb.crop_id).filter(id => id) as string[];
-    const crops = await db.crops.where('id').anyOf(cropIds).toArray();
+    const supplierIds = seedBatches.map(sb => sb.supplier_id).filter(id => id) as string[];
+
+    const [crops, suppliers] = await Promise.all([
+        db.crops.where('id').anyOf(cropIds).toArray(),
+        db.suppliers.where('id').anyOf(supplierIds).toArray()
+    ]);
     const cropMap = new Map(crops.map(c => [c.id, c]));
+    const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
 
     return seedBatches.map(sb => {
         const crop = cropMap.get(sb.crop_id);
@@ -1733,12 +1730,10 @@ export async function getSeedSourceDeclarationData(filters?: DateRangeFilters): 
             cropName: crop?.name || 'Unknown Crop',
             variety: crop?.variety,
             seedBatchCode: sb.batch_code,
-            supplier: sb.supplier,
+            supplier: sb.supplier_id ? supplierMap.get(sb.supplier_id) : undefined,
             purchaseDate: sb.purchase_date ? new Date(sb.purchase_date).toLocaleDateString() : undefined,
             organicStatus: sb.organic_status,
-            // lotNumber: sb.lot_number, // Assuming lot_number might be a field on SeedBatch
-            // originCountry: sb.origin_country, // Assuming origin_country might be a field
-            conformityDeclarationAvailable: false, // Placeholder - needs actual logic if tracking docs
+            conformityDeclarationAvailable: false, // Placeholder
             notes: sb.notes
         };
     }).sort((a,b) => a.cropName.localeCompare(b.cropName) || (a.variety || '').localeCompare(b.variety || ''));
@@ -1755,9 +1750,14 @@ export async function exportSeedSourceDeclarationToPDF(filters?: DateRangeFilter
         const margin = 30;
         const yPos = { y: height - margin };
 
-        await addPdfHeader(pdfDoc, page, yPos);
+        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         yPos.y -= 5;
-        page.drawText("Seed Source Declaration Report", { x: margin, y: yPos.y, font: await pdfDoc.embedFont(StandardFonts.HelveticaBold), size: 14});
+        page.drawText("Seed Source Declaration Report", { x: margin, y: yPos.y, font: customBoldFont, size: 14});
         yPos.y -= 20;
 
         const tableHeaders = ["Crop", "Variety", "Batch Code", "Supplier", "Purchase Date", "Organic Status", "Declaration"];
@@ -1773,7 +1773,7 @@ export async function exportSeedSourceDeclarationToPDF(filters?: DateRangeFilter
             item.conformityDeclarationAvailable ? 'Yes' : 'No'
         ]);
 
-        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, fontSize: 7, headerFontSize: 8, lineHeight: 10 });
+        page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { margin, font: customFont, boldFont: customBoldFont, fontSize: 7, headerFontSize: 8, lineHeight: 10 });
         
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });

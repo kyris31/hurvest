@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { db, SeedlingProductionLog } from '@/lib/db'; // Removed unused SeedBatch, Crop
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import Layout from '@/components/Layout';
 import SeedlingProductionForm from '@/components/SeedlingProductionForm';
 import { PlusCircleIcon } from '@heroicons/react/24/outline';
@@ -75,6 +76,18 @@ export default function SeedlingProductionPage() {
       try {
         await db.seedlingProductionLogs.update(id, { is_deleted: 1, deleted_at: new Date().toISOString(), _synced: 0, _last_modified: Date.now() });
         fetchSeedlingProductionLogs(); // Refresh list
+        // After successful local delete marking, request a push to the server
+        try {
+            console.log("SeedlingProductionPage: Push requesting after delete...");
+            const pushResult = await requestPushChanges();
+            if (pushResult.success) {
+                console.log("SeedlingProductionPage: Push requested successfully after delete.");
+            } else {
+                console.error("SeedlingProductionPage: Push request failed after delete.", pushResult.errors);
+            }
+        } catch (syncError) {
+            console.error("Error requesting push after seedling log delete:", syncError);
+        }
         // Note: Logic to handle impact on SeedBatch.current_quantity if seeds were "returned" would be complex and is not handled here.
         // Similarly, impact on linked PlantingLogs if seedlings were already transplanted.
       } catch (err) {

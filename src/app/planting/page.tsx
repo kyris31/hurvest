@@ -3,6 +3,7 @@
 import React, { useState } from 'react'; // Removed useEffect, useCallback
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, PlantingLog } from '@/lib/db'; // Removed unused SeedBatch, Crop
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import PlantingLogList from '@/components/PlantingLogList';
 import PlantingLogForm from '@/components/PlantingLogForm';
 
@@ -104,6 +105,18 @@ export default function PlantingLogsPage() {
       }
       setShowForm(false);
       setEditingLog(null);
+      // After successful local save, request a push to the server
+      try {
+        console.log("PlantingLogsPage: Push requesting after form submit...");
+        const pushResult = await requestPushChanges();
+        if (pushResult.success) {
+          console.log("PlantingLogsPage: Push requested successfully after form submit.");
+        } else {
+          console.error("PlantingLogsPage: Push request failed after form submit.", pushResult.errors);
+        }
+      } catch (syncError) {
+        console.error("Error requesting push after planting log save:", syncError);
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to save planting log. Please try again.";
       console.error("Failed to save planting log:", err);
@@ -170,6 +183,18 @@ export default function PlantingLogsPage() {
       try {
         await db.markForSync('plantingLogs', id, {}, true);
         // UI will update via useLiveQuery
+        // After successful local delete marking, request a push to the server
+        try {
+            console.log("PlantingLogsPage: Push requesting after delete...");
+            const pushResult = await requestPushChanges();
+            if (pushResult.success) {
+                console.log("PlantingLogsPage: Push requested successfully after delete.");
+            } else {
+                console.error("PlantingLogsPage: Push request failed after delete.", pushResult.errors);
+            }
+        } catch (syncError) {
+            console.error("Error requesting push after planting log delete:", syncError);
+        }
       } catch (err) {
         console.error("Failed to mark planting log for deletion:", err);
         setError("Failed to mark planting log for deletion. See console for details.");

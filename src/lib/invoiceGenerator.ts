@@ -56,8 +56,38 @@ export async function generateInvoicePDFBytes(saleId: string): Promise<Uint8Arra
     let page = pdfDoc.addPage([612, 792]); // Standard US Letter size, declare with let
     const { width, height } = page.getSize();
     
-    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    // --- Font Handling for Greek Characters ---
+    // Standard fonts like Helvetica don't support Greek well.
+    // You need to embed a font that includes Greek glyphs.
+    // Example: Download NotoSansGreek-Regular.ttf and NotoSansGreek-Bold.ttf
+    // and place them in your /public/fonts/ directory.
+
+    let font: PDFFont;
+    let boldFont: PDFFont;
+
+    try {
+      // Ensure these paths are correct and the font files exist in `public/fonts/`
+      const fontBytes = await fetch('/fonts/NotoSansGreek-Regular.ttf').then(res => {
+        if (!res.ok) throw new Error(`Failed to fetch regular font: ${res.statusText}`);
+        return res.arrayBuffer();
+      });
+      const boldFontBytes = await fetch('/fonts/NotoSansGreek-Bold.ttf').then(res => {
+        if (!res.ok) throw new Error(`Failed to fetch bold font: ${res.statusText}`);
+        return res.arrayBuffer();
+      });
+      
+      font = await pdfDoc.embedFont(fontBytes);
+      boldFont = await pdfDoc.embedFont(boldFontBytes);
+      console.log("Successfully embedded custom Greek-supporting fonts.");
+
+    } catch (e) {
+      console.error("Error embedding custom font, falling back to Helvetica. Greek characters will likely not work.", e);
+      // Fallback to standard font if custom font loading fails.
+      // NOTE: Standard fonts will NOT render Greek characters correctly.
+      font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    }
+    // --- End Font Handling ---
     
     let logoImage;
     try {

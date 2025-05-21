@@ -57,6 +57,7 @@ const TABLES_TO_SYNC = [
   // Parents / Independent
   { name: 'crops', dbTable: db.crops },
   { name: 'customers', dbTable: db.customers },
+  { name: 'suppliers', dbTable: db.suppliers }, // Added suppliers
   { name: 'trees', dbTable: db.trees },
   { name: 'input_inventory', dbTable: db.inputInventory },
 
@@ -169,6 +170,21 @@ async function pushChangesToSupabase() {
             delete itemToPush.cropVariety;
             delete itemToPush.seedBatchCode;
           }
+
+          // Log current user session before upsert
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+          if (sessionError) {
+            console.error('[Sync] Error getting session:', sessionError);
+          }
+          const session = sessionData?.session;
+          const currentUser = session?.user; // User is part of the session object
+
+          console.log(
+            `[Sync] About to upsert to ${name}. User:`,
+            currentUser?.email || 'No user in session',
+            `Authenticated:`, !!currentUser,
+            `Session valid until:`, session?.expires_at ? new Date(session.expires_at * 1000) : 'No session/expiry'
+          );
 
           const { error: upsertError } = await supabase.from(name).upsert(itemToPush, { onConflict: 'id' });
           
@@ -368,20 +384,47 @@ export async function synchronize() {
 // Auto-sync (example: on interval or when online status changes)
 let syncInterval: NodeJS.Timeout | null = null;
 
-export function startAutoSync(intervalMinutes = 5) {
+export function startAutoSync(
+  intervalMinutes = 5,
+  onSyncSuccess: (message: string) => void,
+  onSyncError: (errors: SyncError[]) => void
+) {
   if (syncInterval) clearInterval(syncInterval);
   
   const performSync = async () => {
     if (navigator.onLine) {
       console.log("Auto-sync triggered...");
-      await synchronize();
+      try {
+        const result = await synchronize();
+        // Consolidate errors from both push and fetch
+        const pushErrors = result.pushResult.errors || [];
+        const fetchErrors = result.fetchResult.errors || [];
+        const allErrors = [...pushErrors, ...fetchErrors];
+
+        if (allErrors.length > 0) {
+          console.error("Auto-sync encountered errors:", allErrors);
+          onSyncError(allErrors);
+        } else {
+          // Only call onSyncSuccess if there are truly no errors from either phase
+          if (result.pushResult.changesPushed > 0 || result.fetchResult.changesFetched > 0) {
+            onSyncSuccess("Auto-sync successful at " + new Date().toLocaleTimeString());
+          } else {
+            onSyncSuccess("Auto-sync: No changes detected at " + new Date().toLocaleTimeString());
+          }
+        }
+      } catch (e) {
+        console.error("Auto-sync process failed:", e);
+        const errorMessage = e instanceof Error ? e.message : "Unknown error during auto-sync.";
+        onSyncError([{ table: 'N/A', id: 'N/A', message: `Auto-sync process error: ${errorMessage}` }]);
+      }
     } else {
       console.log("Offline, auto-sync skipped.");
+      // Optionally call onSyncError or a specific offline callback
     }
   };
   
-  // Perform initial sync
-  performSync(); 
+  // Perform initial sync immediately when auto-sync starts
+  performSync();
   
   syncInterval = setInterval(performSync, intervalMinutes * 60 * 1000);
   console.log(`Auto-sync started. Interval: ${intervalMinutes} minutes.`);
@@ -398,7 +441,40 @@ export function stopAutoSync() {
 // Manual Sync Trigger
 export async function triggerManualSync() {
     console.log("Manual sync triggered...");
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session?.user) {
+        console.warn("triggerManualSync: User session not found. Sync aborted.");
+        // Return a structure similar to synchronize() but indicating no operation or an error
+        return {
+            pushResult: { changesPushed: 0, errors: [{ table: 'N/A', id: 'N/A', message: 'User not authenticated for sync.' }] },
+            fetchResult: { changesFetched: 0, errors: [{ table: 'N/A', id: 'N/A', message: 'User not authenticated for sync.' }] }
+        };
+    }
     return await synchronize();
+}
+
+// Function to request a push of local changes to the server
+// This is intended to be called after local DB operations for quicker server updates.
+export async function requestPushChanges() {
+  if (!navigator.onLine) {
+    console.log("requestPushChanges: Offline. Skipping push.");
+    return { success: false, errors: [{ table: 'N/A', id: 'N/A', message: 'Offline. Cannot push changes.' }] };
+  }
+  console.log("requestPushChanges: Attempting to push local changes...");
+  try {
+    const { errors } = await pushChangesToSupabase();
+    if (errors.length > 0) {
+      console.error("requestPushChanges: Errors occurred during push:", errors);
+      return { success: false, errors };
+    }
+    console.log("requestPushChanges: Push successful.");
+    return { success: true, errors: [] };
+  } catch (error) {
+    console.error("requestPushChanges: Unhandled error during push:", error);
+    const message = error instanceof Error ? error.message : "Unknown error";
+    return { success: false, errors: [{ table: 'N/A', id: 'N/A', message: `Push failed: ${message}` }] };
+  }
 }
 
 // TODO:

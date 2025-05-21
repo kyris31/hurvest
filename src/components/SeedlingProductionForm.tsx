@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, FormEvent } from 'react';
 import { db, SeedlingProductionLog, SeedBatch } from '@/lib/db'; // Assuming db is your Dexie instance, removed unused Crop
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 
 interface SeedlingProductionFormProps {
   existingLog?: SeedlingProductionLog | null;
@@ -216,6 +217,18 @@ const SeedlingProductionForm: React.FC<SeedlingProductionFormProps> = ({ existin
             _synced: 0,
             _last_modified: Date.now()
         });
+      }
+      // After successful local save, request a push to the server
+      try {
+        console.log("SeedlingProductionForm: Push requesting after form submit...");
+        const pushResult = await requestPushChanges();
+        if (pushResult.success) {
+          console.log("SeedlingProductionForm: Push requested successfully after form submit.");
+        } else {
+          console.error("SeedlingProductionForm: Push request failed after form submit.", pushResult.errors);
+        }
+      } catch (syncError) {
+        console.error("Error requesting push after seedling production log save:", syncError);
       }
       onClose(true); // Refresh list
     } catch (err) {

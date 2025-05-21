@@ -6,6 +6,7 @@ import SaleList from '@/components/SaleList';
 import SaleForm from '@/components/SaleForm';
 import { downloadInvoicePDF } from '@/lib/invoiceGenerator';
 import { exportSalesToCSV, exportSalesToPDF } from '@/lib/reportUtils'; // Import CSV and PDF export functions
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 
 export default function SalesPage() {
   const [sales, setSales] = useState<Sale[]>([]);
@@ -97,11 +98,11 @@ export default function SalesPage() {
         if (editingSale) {
           const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(editingSale.id).toArray();
           for (const item of itemsToSoftDelete) {
-            await db.markForSync(db.saleItems, item.id, true);
+            await db.markForSync('saleItems', item.id, {}, true); // Pass table name string
           }
           const invoiceToSoftDelete = await db.invoices.where('sale_id').equals(editingSale.id).first();
           if (invoiceToSoftDelete) {
-            await db.markForSync(db.invoices, invoiceToSoftDelete.id, true);
+            await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true); // Pass table name string
           }
           
           const updatedSaleData: Sale = {
@@ -152,7 +153,7 @@ export default function SalesPage() {
               sale_id: saleId,
               invoice_number: invoiceNumber,
               invoice_date: saleData.sale_date,
-              status: 'generated',
+              status: 'Draft', // Changed from 'generated' to a valid status
               pdf_url: `placeholder_invoice_${saleId}.pdf`,
               created_at: now,
               updated_at: now,
@@ -173,6 +174,16 @@ export default function SalesPage() {
         // Optionally set a non-blocking UI notification about PDF download failure
         // setError("Sale saved, but failed to auto-download invoice. You can download it manually from the list.");
       });
+
+      // After successful local save, request a push to the server
+      console.log("SalesPage: Attempting immediate push after form submit...");
+      const pushResult = await requestPushChanges();
+      if (pushResult.success) {
+        console.log("SalesPage: Immediate push successful.");
+      } else {
+        console.error("SalesPage: Immediate push failed.", pushResult.errors);
+        // setError("Sale saved locally, but failed to push to server immediately. It will sync later.");
+      }
 
       await fetchData();
       setShowForm(false);
@@ -206,14 +217,24 @@ export default function SalesPage() {
         await db.transaction('rw', db.sales, db.saleItems, db.invoices, async () => {
             const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(id).toArray();
             for (const item of itemsToSoftDelete) {
-              await db.markForSync(db.saleItems, item.id, true);
+              await db.markForSync('saleItems', item.id, {}, true); // Pass table name string
             }
             const invoiceToSoftDelete = await db.invoices.where('sale_id').equals(id).first();
             if (invoiceToSoftDelete) {
-              await db.markForSync(db.invoices, invoiceToSoftDelete.id, true);
+              await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true); // Pass table name string
             }
-            await db.markForSync(db.sales, id, true);
+            await db.markForSync('sales', id, {}, true); // Pass table name string
         });
+        
+        // After successful local delete marking, request a push to the server
+        console.log("SalesPage: Attempting immediate push after delete operation...");
+        const deletePushResult = await requestPushChanges();
+        if (deletePushResult.success) {
+          console.log("SalesPage: Immediate push after delete successful.");
+        } else {
+          console.error("SalesPage: Immediate push after delete failed.", deletePushResult.errors);
+        }
+
         await fetchData();
       } catch (err) {
         console.error("Failed to delete sale:", err);

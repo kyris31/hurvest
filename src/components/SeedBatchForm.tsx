@@ -1,11 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { SeedBatch, Crop, db } from '@/lib/db';
+import { SeedBatch, Crop, db, Supplier } from '@/lib/db'; // Added Supplier
 
 interface SeedBatchFormProps {
   initialData?: SeedBatch | null;
-  onSubmit: (data: Omit<SeedBatch, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | SeedBatch) => Promise<void>;
+  // onSubmit will now receive data that includes supplier_id and not supplier string
+  onSubmit: (data: Omit<SeedBatch, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'supplier'> | SeedBatch) => Promise<void>;
   onCancel: () => void;
   isSubmitting: boolean;
 }
@@ -14,7 +15,7 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
   const [cropId, setCropId] = useState('');
   const [batchCode, setBatchCode] = useState('');
   // const [variety, setVariety] = useState(''); // Variety is now part of the selected Crop, remove from SeedBatch state
-  const [supplier, setSupplier] = useState('');
+  const [supplierId, setSupplierId] = useState<string>(''); // Changed from supplier to supplierId
   const [purchaseDate, setPurchaseDate] = useState('');
   const [initialQuantity, setInitialQuantity] = useState<number | ''>('');
   // const [currentQuantity, setCurrentQuantity] = useState<number | ''>(''); // For new batches, current = initial
@@ -24,24 +25,17 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
   const [organicStatus, setOrganicStatus] = useState<string>(''); // New state for organic_status
   const [notes, setNotes] = useState('');
   const [availableCrops, setAvailableCrops] = useState<Crop[]>([]);
-  const [availableSuppliers, setAvailableSuppliers] = useState<string[]>([]);
+  const [availableSuppliers, setAvailableSuppliers] = useState<Supplier[]>([]); // Changed to Supplier[]
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [cropsData, seedBatchesData, inputInventoryData] = await Promise.all([
-          db.crops.filter(c => c.is_deleted !== 1).toArray(),
-          db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(), // Still fetch for suppliers
-          db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray() // Still fetch for suppliers
-        ]);
-        
+        const cropsData = await db.crops.filter(c => c.is_deleted !== 1).sortBy('name');
         setAvailableCrops(cropsData);
 
-        const seedSuppliers = new Set(seedBatchesData.map(sb => sb.supplier).filter(Boolean) as string[]);
-        const inputSuppliers = new Set(inputInventoryData.map(ii => ii.supplier).filter(Boolean) as string[]);
-        const allSuppliers = Array.from(new Set([...seedSuppliers, ...inputSuppliers])).sort();
-        setAvailableSuppliers(allSuppliers);
+        const suppliersData = await db.suppliers.filter(s => s.is_deleted !== 1).sortBy('name');
+        setAvailableSuppliers(suppliersData);
 
       } catch (error) {
         console.error("Failed to fetch form data for SeedBatchForm", error);
@@ -54,7 +48,7 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
       setCropId(initialData.crop_id);
       setBatchCode(initialData.batch_code);
       // setVariety(initialData.variety || ''); // Variety removed from SeedBatch
-      setSupplier(initialData.supplier || '');
+      setSupplierId(initialData.supplier_id || ''); // Use supplier_id
       setPurchaseDate(initialData.purchase_date ? initialData.purchase_date.split('T')[0] : '');
       setInitialQuantity(initialData.initial_quantity ?? '');
       // setCurrentQuantity(initialData.current_quantity ?? ''); // Load current quantity for editing
@@ -66,7 +60,7 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
     } else {
       setCropId('');
       setBatchCode('');
-      setSupplier('');
+      setSupplierId(''); // Reset supplierId
       setPurchaseDate('');
       setInitialQuantity('');
       // setCurrentQuantity(''); // Reset for new
@@ -106,7 +100,7 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
       crop_id: cropId,
       batch_code: finalBatchCode,
       // variety: variety.trim() || undefined, // Variety removed from SeedBatch data
-      supplier: supplier.trim() || undefined,
+      supplier_id: supplierId || undefined, // Use supplier_id
       purchase_date: purchaseDate || undefined,
       initial_quantity: Number(initialQuantity),
       // For new batches, current_quantity is same as initial_quantity
@@ -217,33 +211,24 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
           */}
 
           <div>
-            <label htmlFor="supplier" className="block text-sm font-medium text-gray-700">Supplier</label>
-            <div className="flex items-center">
-                <select
-                    id="supplierSelect"
-                    value={supplier}
-                    onChange={(e) => setSupplier(e.target.value)}
-                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-                    disabled={isSubmitting}
-                >
-                    <option value="">Select or type new supplier</option>
-                    {availableSuppliers.map(s => (
-                        <option key={s} value={s}>{s}</option>
-                    ))}
-                </select>
-                {/* Optional: Button to clear selection and type new, or just allow typing in a combined field */}
-            </div>
-             <input
-              type="text"
-              id="supplierText"
-              placeholder="Or type new supplier name"
-              value={supplier} // This will reflect dropdown selection or typed value
-              onChange={(e) => setSupplier(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-              disabled={isSubmitting}
-            />
+            <label htmlFor="supplierId" className="block text-sm font-medium text-gray-700">Supplier</label>
+            <select
+              id="supplierId"
+              name="supplierId"
+              value={supplierId}
+              onChange={(e) => setSupplierId(e.target.value)}
+              className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+              disabled={isSubmitting || availableSuppliers.length === 0}
+            >
+              <option value="">Select a Supplier (Optional)</option>
+              {availableSuppliers.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            {availableSuppliers.length === 0 && <p className="text-xs text-gray-500 mt-1">No suppliers available. Add suppliers via the 'Manage Suppliers' page.</p>}
           </div>
-
 
           <div>
             <label htmlFor="purchaseDate" className="block text-sm font-medium text-gray-700">Purchase Date</label>

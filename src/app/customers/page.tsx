@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation'; // For query params
 import { db, Customer, Sale, SaleItem } from '@/lib/db'; // Added Sale and SaleItem
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import CustomerList from '@/components/CustomerList';
 import CustomerForm from '@/components/CustomerForm';
 
@@ -84,9 +85,26 @@ export default function CustomersPage() {
       await fetchData();
       setShowForm(false);
       setEditingCustomer(null);
-       if (searchParams.get('action') === 'add') {
+      if (searchParams.get('action') === 'add') {
         router.replace('/customers', undefined); // Clear query param
       }
+      // After successful local save, request a push to the server and wait for it
+      console.log("CustomersPage: Attempting immediate push after form submit...");
+      const pushResult = await requestPushChanges();
+      if (pushResult.success) {
+        console.log("CustomersPage: Immediate push successful.");
+      } else {
+        console.error("CustomersPage: Immediate push failed.", pushResult.errors);
+        // Optionally, set an error message for the user here
+        // setError("Customer saved locally, but failed to push to server immediately. It will sync later.");
+      }
+      // It's important that pushChangesToSupabase (called by requestPushChanges)
+      // updates the _synced flag in Dexie correctly.
+      // Now, re-fetch data to update the UI.
+      // If CustomerList were using useLiveQuery on customers, this explicit fetchData might not be needed
+      // for the sync status to update, but it's good for consistency if other customer details changed.
+      await fetchData();
+
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to save customer. Please try again.";
       console.error("Failed to save customer:", err);

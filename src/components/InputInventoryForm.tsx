@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { InputInventory } from '@/lib/db'; // Removed unused db import
+import { db, InputInventory, Supplier } from '@/lib/db'; // Added db and Supplier import
 
 interface InputInventoryFormProps {
   initialData?: InputInventory | null;
-  onSubmit: (data: Omit<InputInventory, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | InputInventory) => Promise<void>;
+  onSubmit: (data: Omit<InputInventory, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'supplier'> | InputInventory) => Promise<void>;
   onCancel: () => void;
   isSubmitting: boolean;
 }
@@ -13,7 +13,8 @@ interface InputInventoryFormProps {
 export default function InputInventoryForm({ initialData, onSubmit, onCancel, isSubmitting }: InputInventoryFormProps) {
   const [name, setName] = useState('');
   const [type, setType] = useState('');
-  const [supplier, setSupplier] = useState('');
+  const [supplierId, setSupplierId] = useState<string>(''); // Changed to supplierId
+  const [availableSuppliers, setAvailableSuppliers] = useState<Supplier[]>([]);
   const [purchaseDate, setPurchaseDate] = useState('');
   const [quantityPurchased, setQuantityPurchased] = useState<number | ''>(''); // Renamed from initialQuantity for clarity in form
   const [currentQuantityDisplay, setCurrentQuantityDisplay] = useState<number | ''>(''); // For read-only display
@@ -23,12 +24,38 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
+    const fetchSuppliers = async () => {
+      try {
+        // Apply orderBy on the table directly, then filter.
+        // Or, more commonly, if 'is_deleted' is an index, you'd do:
+        // db.suppliers.where('is_deleted').notEqual(1).sortBy('name')
+        // However, sortBy on a collection is for client-side sort after fetch.
+        // For indexedDB efficiency, if 'name' is an index, orderBy is better on the table.
+        // If 'name' is not an index, this will sort client-side after fetching all non-deleted.
+        const activeSuppliers = await db.suppliers
+          .filter(supplier => supplier.is_deleted !== 1)
+          .sortBy('name'); // sortBy is for collections, sorts client-side
+        // If 'name' is an indexed field and you want DB-side ordering on non-deleted items:
+        // This is more complex as orderBy is on Table/WhereClause.
+        // A simpler approach for now, assuming moderate number of suppliers:
+        // Fetch all non-deleted, then sort client-side.
+        // const allNonDeletedSuppliers = await db.suppliers.where('is_deleted').notEqual(1).toArray();
+        // const activeSuppliers = allNonDeletedSuppliers.sort((a, b) => a.name.localeCompare(b.name));
+        // For simplicity and given useLiveQuery often handles this well, let's use filter().sortBy()
+        setAvailableSuppliers(activeSuppliers);
+      } catch (err) {
+        console.error("Failed to fetch suppliers for form:", err);
+        // Optionally set a form error here
+      }
+    };
+    fetchSuppliers();
+
     if (initialData) {
       setName(initialData.name);
       setType(initialData.type || '');
-      setSupplier(initialData.supplier || '');
+      setSupplierId(initialData.supplier_id || ''); // Use supplier_id
       setPurchaseDate(initialData.purchase_date ? initialData.purchase_date.split('T')[0] : '');
-      setQuantityPurchased(initialData.initial_quantity ?? ''); // Use initial_quantity for this field
+      setQuantityPurchased(initialData.initial_quantity ?? '');
       setCurrentQuantityDisplay(initialData.current_quantity ?? ''); // For display
       setQuantityUnit(initialData.quantity_unit || '');
       setTotalPurchaseCost(initialData.total_purchase_cost ?? ''); // Use new field name
@@ -37,7 +64,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
       // Reset form
       setName('');
       setType('');
-      setSupplier('');
+      setSupplierId(''); // Reset supplierId
       setPurchaseDate('');
       setQuantityPurchased('');
       setCurrentQuantityDisplay('');
@@ -70,7 +97,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
     const inventoryData = {
       name: name.trim(),
       type: type.trim() || undefined,
-      supplier: supplier.trim() || undefined,
+      supplier_id: supplierId || undefined, // Use supplier_id
       purchase_date: purchaseDate || undefined,
       initial_quantity: numQuantityPurchased,
       current_quantity: initialData ? initialData.current_quantity : numQuantityPurchased, // For edit, preserve existing current_quantity; for new, set to initial
@@ -145,15 +172,22 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
           </div>
           
           <div>
-            <label htmlFor="supplier" className="block text-sm font-medium text-gray-700">Supplier</label>
-            <input
-              type="text"
-              id="supplier"
-              value={supplier}
-              onChange={(e) => setSupplier(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+            <label htmlFor="supplierId" className="block text-sm font-medium text-gray-700">Supplier</label>
+            <select
+              id="supplierId"
+              name="supplierId"
+              value={supplierId}
+              onChange={(e) => setSupplierId(e.target.value)}
+              className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
               disabled={isSubmitting}
-            />
+            >
+              <option value="">Select a Supplier (Optional)</option>
+              {availableSuppliers.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div>

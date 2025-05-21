@@ -1,18 +1,25 @@
 'use client';
 
 import React from 'react';
-import { InputInventory } from '@/lib/db';
+import { InputInventory, Supplier } from '@/lib/db'; // Added Supplier
 import { QRCodeCanvas } from 'qrcode.react';
 
 interface InputInventoryListProps {
   inventoryItems: InputInventory[];
+  suppliers: Supplier[]; // Added suppliers prop
   onEdit: (item: InputInventory) => void;
   onDelete: (id: string) => Promise<void>;
   isDeleting: string | null; // ID of item being deleted, or null
 }
 
-export default function InputInventoryList({ inventoryItems, onEdit, onDelete, isDeleting }: InputInventoryListProps) {
+export default function InputInventoryList({ inventoryItems, suppliers, onEdit, onDelete, isDeleting }: InputInventoryListProps) {
   const activeItems = inventoryItems.filter(item => item.is_deleted !== 1);
+  
+  // Create a map for quick supplier lookup
+  const supplierMap = React.useMemo(() =>
+    new Map(suppliers.map(s => [s.id, s.name])),
+    [suppliers]
+  );
 
   if (activeItems.length === 0) {
     return <p className="text-center text-gray-500 mt-8">No active inventory items found. Add your first item to get started!</p>;
@@ -40,11 +47,12 @@ export default function InputInventoryList({ inventoryItems, onEdit, onDelete, i
             const costPerUnit = (item.total_purchase_cost !== undefined && item.initial_quantity !== undefined && item.initial_quantity > 0)
               ? (item.total_purchase_cost / item.initial_quantity)
               : undefined;
+            const supplierName = item.supplier_id ? supplierMap.get(item.supplier_id) : null;
             return (
               <tr key={item.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
                 <td className="py-3 px-5">{item.name}</td>
                 <td className="py-3 px-5">{item.type || <span className="text-gray-400">N/A</span>}</td>
-                <td className="py-3 px-5">{item.supplier || <span className="text-gray-400">N/A</span>}</td>
+                <td className="py-3 px-5">{supplierName || <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5 text-right">{item.current_quantity ?? <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5">{item.quantity_unit || <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5 text-right">{item.total_purchase_cost !== undefined ? item.total_purchase_cost.toFixed(2) : <span className="text-gray-400">N/A</span>}</td>

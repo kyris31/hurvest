@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react'; // Removed useCallback
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, SeedBatch } from '@/lib/db'; // Removed unused Crop import
+import { db, SeedBatch, Crop, Supplier } from '@/lib/db'; // Added Crop and Supplier
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import SeedBatchList from '@/components/SeedBatchList';
 import SeedBatchForm from '@/components/SeedBatchForm';
 
@@ -66,8 +67,21 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
     },
     [] // Dependencies for the query itself
   );
+
+  const suppliers = useLiveQuery(
+    async () => {
+      try {
+        return await db.suppliers.filter(s => s.is_deleted !== 1).sortBy('name');
+      } catch (err) {
+        console.error("Failed to fetch suppliers for SeedBatchesPage:", err);
+        // setError("Failed to load supplier data."); // Avoid overwriting primary error
+        return [];
+      }
+    },
+    []
+  );
   
-  const isLoading = seedBatches === undefined || crops === undefined;
+  const isLoading = seedBatches === undefined || crops === undefined || suppliers === undefined;
 
   // This useEffect is no longer needed
   // useEffect(() => {
@@ -75,7 +89,7 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
   //   fetchData();
   // }, [fetchData, syncCounter]);
 
-  const handleFormSubmit = async (data: Omit<SeedBatch, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | SeedBatch) => {
+  const handleFormSubmit = async (data: Omit<SeedBatch, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'supplier'> | SeedBatch) => {
     setIsSubmitting(true);
     setError(null);
     try {
@@ -107,8 +121,20 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
       if (searchParams.get('action') === 'add') {
          const newPath = window.location.pathname;
          router.replace(newPath, undefined);
-      }
-    } catch (err: unknown) {
+     }
+     // After successful local save, request a push to the server
+     try {
+       console.log("SeedBatchPage: Push requesting after form submit...");
+       const pushResult = await requestPushChanges();
+       if (pushResult.success) {
+         console.log("SeedBatchPage: Push requested successfully after form submit.");
+       } else {
+         console.error("SeedBatchPage: Push request failed after form submit.", pushResult.errors);
+       }
+     } catch (syncError) {
+       console.error("Error requesting push after seed batch save:", syncError);
+     }
+   } catch (err: unknown) {
       console.error("Failed to save seed batch:", err);
       if (err instanceof Error && err.name === 'ConstraintError') {
         setError("Failed to save seed batch. The Batch Code might already exist. Please use a unique Batch Code.");
@@ -127,18 +153,59 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
   };
 
   const handleDelete = async (id: string) => {
-    if (window.confirm("Are you sure you want to delete this seed batch? This may affect associated planting logs.")) {
+    setError(null); // Clear previous errors
+
+    try {
+      // Check for related Seedling Production Logs
+      const relatedSeedlingLogs = await db.seedlingProductionLogs
+        .where('seed_batch_id')
+        .equals(id)
+        .filter(log => log.is_deleted !== 1)
+        .count();
+
+      if (relatedSeedlingLogs > 0) {
+        setError(`Cannot delete this seed batch: it is used by ${relatedSeedlingLogs} seedling production log(s). Please delete or reassign them first.`);
+        return;
+      }
+
+      // Check for related Planting Logs (direct sowing)
+      const relatedPlantingLogs = await db.plantingLogs
+        .where('seed_batch_id')
+        .equals(id)
+        .filter(log => log.is_deleted !== 1)
+        .count();
+      
+      if (relatedPlantingLogs > 0) {
+        setError(`Cannot delete this seed batch: it is used by ${relatedPlantingLogs} planting log(s) for direct sowing. Please delete or reassign them first.`);
+        return;
+      }
+
+    } catch (checkError) {
+      console.error("Error checking for related records for seed batch:", checkError);
+      setError("Could not verify if seed batch is in use. Deletion aborted.");
+      return;
+    }
+
+    if (window.confirm("Are you sure you want to delete this seed batch?")) {
       setIsDeleting(id);
-      setError(null);
       try {
-        await db.markForSync(db.seedBatches, id, true);
-        // Consider implications for related data (e.g., planting logs using this batch)
-        // Soft delete here doesn't automatically cascade to planting_logs' seed_batch_id if it's just a string ref.
-        // The UI for planting logs would show "Unknown Batch" or similar if the batch is soft-deleted.
-        // await fetchData(); // No longer need to manually call fetchData
+        await db.markForSync('seedBatches', id, {}, true); // Corrected table name and added empty itemChanges
+        // UI will update via useLiveQuery
+        // After successful local delete marking, request a push to the server
+        try {
+            console.log("SeedBatchPage: Push requesting after delete...");
+            const pushResult = await requestPushChanges();
+            if (pushResult.success) {
+                console.log("SeedBatchPage: Push requested successfully after delete.");
+            } else {
+                console.error("SeedBatchPage: Push request failed after delete.", pushResult.errors);
+            }
+        } catch (syncError) {
+            console.error("Error requesting push after seed batch delete:", syncError);
+        }
       } catch (err) {
-        console.error("Failed to delete seed batch:", err);
-        setError("Failed to delete seed batch.");
+        console.error("Failed to mark seed batch for deletion:", err);
+        setError("Failed to mark seed batch for deletion. See console for details.");
       } finally {
         setIsDeleting(null);
       }
@@ -178,16 +245,17 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
       <div className="mt-4">
         {error && <p className="text-red-500 mb-4 p-3 bg-red-100 rounded-md">{error}</p>}
         {isLoading && <p className="text-center text-gray-500">Loading seed batches...</p>}
-        {!isLoading && !error && seedBatches && crops && (
+        {!isLoading && !error && seedBatches && crops && suppliers && (
           <SeedBatchList
             seedBatches={seedBatches}
             crops={crops}
+            suppliers={suppliers} // Pass suppliers to the list
             onEdit={handleEdit}
             onDelete={handleDelete}
             isDeleting={isDeleting}
           />
         )}
-        {!isLoading && seedBatches && seedBatches.length === 0 && !error && (
+        {!isLoading && seedBatches && crops && suppliers && seedBatches.length === 0 && !error && (
            <div className="text-center py-10">
             <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>

@@ -45,6 +45,11 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
         db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(), // Ensure filtered
         db.crops.filter(c => c.is_deleted !== 1).toArray(), // Ensure filtered
       ]);
+      console.log("SaleForm fetchFormData - Fetched customers:", customers);
+      console.log("SaleForm fetchFormData - Fetched harvests:", harvests);
+      console.log("SaleForm fetchFormData - Fetched plantingLogs:", plantingLogs);
+      console.log("SaleForm fetchFormData - Fetched seedBatches:", seedBatches);
+      console.log("SaleForm fetchFormData - Fetched crops:", crops);
       setAvailableCustomers(customers);
       
       const enrichedHarvests = harvests.map(h => {
@@ -61,6 +66,7 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
         }
         return { ...h, cropName, plantingDate: pLog?.planting_date };
       });
+      console.log("SaleForm fetchFormData - Enriched harvests:", enrichedHarvests);
       setAvailableHarvests(enrichedHarvests);
 
     } catch (error) {
@@ -98,7 +104,7 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
       setSaleDate(new Date().toISOString().split('T')[0]);
       setItems([{ key: `item-0-${Date.now()}`, harvest_log_id: '', quantity_sold: 0, price_per_unit: 0, discount_type: null, discount_value: null, notes: '' }]);
     }
-  }, [initialData, fetchFormData, availableHarvests]); // Added availableHarvests
+  }, [initialData, fetchFormData]); // Removed availableHarvests to prevent loop
 
   const handleItemChange = (index: number, field: keyof SaleItem | 'quantity_sold_str' | 'price_per_unit_str' | 'discount_value_str', value: unknown) => {
     const newItemsState = [...items];

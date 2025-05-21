@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { db, CultivationLog, PlantingLog, SeedBatch, Crop, InputInventory } from '@/lib/db';
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import CultivationLogList from '@/components/CultivationLogList';
 import CultivationLogForm from '@/components/CultivationLogForm';
 
@@ -113,6 +114,19 @@ export default function CultivationLogsPage() {
         }
       }); // End transaction
 
+      // After successful local save, request a push to the server
+      try {
+        console.log("CultivationLogsPage: Push requesting after form submit...");
+        const pushResult = await requestPushChanges();
+        if (pushResult.success) {
+          console.log("CultivationLogsPage: Push requested successfully after form submit.");
+        } else {
+          console.error("CultivationLogsPage: Push request failed after form submit.", pushResult.errors);
+        }
+      } catch (syncError) {
+        console.error("Error requesting push after cultivation log save:", syncError);
+      }
+
       await fetchData();
       setShowForm(false);
       setEditingLog(null);
@@ -148,8 +162,22 @@ export default function CultivationLogsPage() {
                   });
               }
           }
-          await db.markForSync(db.cultivationLogs, id, true);
+          await db.markForSync('cultivationLogs', id, {}, true); // Pass table name string
         });
+        
+        // After successful local delete marking, request a push to the server
+        try {
+            console.log("CultivationLogsPage: Push requesting after delete...");
+            const pushResult = await requestPushChanges();
+            if (pushResult.success) {
+                console.log("CultivationLogsPage: Push requested successfully after delete.");
+            } else {
+                console.error("CultivationLogsPage: Push request failed after delete.", pushResult.errors);
+            }
+        } catch (syncError) {
+            console.error("Error requesting push after cultivation log delete:", syncError);
+        }
+
         await fetchData();
       } catch (err) {
         console.error("Failed to delete cultivation log:", err);

@@ -22,7 +22,8 @@ export interface SeedBatch {
   crop_id: string; // Foreign key to Crop
   batch_code: string;
   // variety?: string; // Removed: Variety is now part of the Crop entity
-  supplier?: string;
+  // supplier?: string; // Will be replaced by supplier_id
+  supplier_id?: string; // Foreign key to Suppliers table
   purchase_date?: string; // ISOString (Date)
   initial_quantity?: number;
   current_quantity?: number; // Added to track available quantity
@@ -44,7 +45,8 @@ export interface InputInventory {
   id: string; // UUID
   name: string;
   type?: string;
-  supplier?: string;
+  // supplier?: string; // Will be replaced by supplier_id
+  supplier_id?: string; // Foreign key to Suppliers table
   supplier_invoice_number?: string; // New field
   purchase_date?: string; // ISOString (Date)
   initial_quantity?: number;
@@ -166,7 +168,7 @@ export interface Invoice {
   invoice_number: string;
   invoice_date: string; // ISOString (Date)
   pdf_url?: string; // URL to PDF in Supabase Storage or path to local blob
-  status?: string;
+  status?: 'Draft' | 'Sent' | 'Paid' | 'Overdue';
   notes?: string;
   created_at?: string; // ISOString
   updated_at?: string; // ISOString
@@ -236,7 +238,24 @@ export interface SeedlingProductionLog {
   deleted_at?: string;
 }
 
+export interface Supplier {
+  id: string; // UUID
+  name: string;
+  contact_person?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  created_at?: string; // ISOString
+  updated_at?: string; // ISOString
+  _synced?: number;
+  _last_modified?: number;
+  is_deleted?: number;
+  deleted_at?: string;
+}
+
 export type HurvesthubTableName =
+  | 'suppliers' // Added suppliers
   | 'crops'
   | 'seedBatches'
   | 'inputInventory'
@@ -266,7 +285,8 @@ class HurvesthubDB extends Dexie {
   syncMeta!: Table<SyncMeta, string>;
   trees!: Table<Tree, string>;
   reminders!: Table<Reminder, string>;
-  seedlingProductionLogs!: Table<SeedlingProductionLog, string>; // New table for seedling production
+  seedlingProductionLogs!: Table<SeedlingProductionLog, string>;
+  suppliers!: Table<Supplier, string>; // Added suppliers table
 
   constructor() {
     super('HurvesthubDB');
@@ -547,16 +567,106 @@ class HurvesthubDB extends Dexie {
     // This might be redundant if already correctly defined in v4/v9, but ensures schema string matches interface
     this.version(16).stores({
         inputInventory: 'id, name, type, supplier_invoice_number, purchase_date, initial_quantity, current_quantity, quantity_unit, total_purchase_cost, notes, qr_code_data, _last_modified, _synced, is_deleted'
+        // Ensure all other existing tables are re-declared here if they are part of v16
     }).upgrade(async tx => {
         console.log("Upgrading HurvesthubDB to version 16: Ensuring all InputInventory fields are in schema string.");
-        // No data migration typically needed if fields were already present in interface and just missing from schema string.
-        // If total_purchase_cost was truly new here, migration from cost_per_unit would be needed.
-        // However, that migration was in v5. This is more about schema string completeness.
         await tx.table('inputInventory').toCollection().modify(ii => {
-            // Example: ensure notes is not undefined if it should be null
             if (ii.notes === undefined) ii.notes = null;
         });
         console.log("Finished upgrading HurvesthubDB to version 16.");
+    });
+
+    // Version 17: Added Suppliers table
+    this.version(17).stores({
+      suppliers: 'id, name, email, phone, _last_modified, _synced, is_deleted',
+      // Re-declare all other tables from the previous version (v16)
+      // It's crucial to list all tables that should exist in this version.
+      // If a table is not listed, Dexie might consider it removed.
+      crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
+      seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, estimated_seeds_per_sowing_unit, organic_status, _last_modified, _synced, is_deleted',
+      inputInventory: 'id, name, type, supplier_invoice_number, purchase_date, initial_quantity, current_quantity, quantity_unit, total_purchase_cost, notes, qr_code_data, _last_modified, _synced, is_deleted',
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, _last_modified, _synced, is_deleted',
+      harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
+      customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, _last_modified, _synced, is_deleted',
+      saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
+      invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, quantity_sown_value, sowing_unit_from_batch, estimated_total_individual_seeds_sown, current_seedlings_available, _last_modified, _synced, is_deleted',
+    }).upgrade(async _tx => {
+        console.log("Upgrading HurvesthubDB to version 17: Adding Suppliers table.");
+        // No data migration needed for existing tables when just adding a new one.
+        // Default values for new fields in Supplier interface will be handled by TypeScript's optional chaining or default values in forms.
+        console.log("Finished upgrading HurvesthubDB to version 17.");
+    });
+
+    // Version 18: Modify InputInventory to use supplier_id
+    this.version(18).stores({
+      inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, purchase_date, initial_quantity, current_quantity, quantity_unit, total_purchase_cost, notes, qr_code_data, _last_modified, _synced, is_deleted', // supplier changed to supplier_id
+      // Re-declare all other tables from version 17
+      suppliers: 'id, name, email, phone, _last_modified, _synced, is_deleted',
+      crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
+      seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, estimated_seeds_per_sowing_unit, organic_status, _last_modified, _synced, is_deleted',
+      // inputInventory is declared above with the new schema
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, _last_modified, _synced, is_deleted',
+      harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
+      customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, _last_modified, _synced, is_deleted',
+      saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
+      invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, quantity_sown_value, sowing_unit_from_batch, estimated_total_individual_seeds_sown, current_seedlings_available, _last_modified, _synced, is_deleted',
+    }).upgrade(async tx => {
+      console.log("Upgrading HurvesthubDB to version 18: Modifying InputInventory to use supplier_id.");
+      await tx.table('inputInventory').toCollection().modify(item => {
+        // Since we cleared data, we don't need to migrate old 'supplier' string to a 'supplier_id'.
+        // We just ensure the old 'supplier' field is removed if it somehow existed and 'supplier_id' is present.
+        if (item.supplier) {
+          delete item.supplier;
+        }
+        if (item.supplier_id === undefined) {
+          item.supplier_id = null; // Or undefined, depending on preference for optional fields
+        }
+      });
+      console.log("Finished upgrading HurvesthubDB to version 18.");
+    });
+
+    // Version 19: Modify SeedBatch to use supplier_id
+    this.version(19).stores({
+      seedBatches: 'id, crop_id, supplier_id, batch_code, initial_quantity, current_quantity, qr_code_data, estimated_seeds_per_sowing_unit, organic_status, _last_modified, _synced, is_deleted', // supplier changed to supplier_id
+      // Re-declare all other tables from version 18
+      inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, purchase_date, initial_quantity, current_quantity, quantity_unit, total_purchase_cost, notes, qr_code_data, _last_modified, _synced, is_deleted',
+      suppliers: 'id, name, email, phone, _last_modified, _synced, is_deleted',
+      crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
+      // seedBatches is declared above with the new schema
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, _last_modified, _synced, is_deleted',
+      harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
+      customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, _last_modified, _synced, is_deleted',
+      saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
+      invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, quantity_sown_value, sowing_unit_from_batch, estimated_total_individual_seeds_sown, current_seedlings_available, _last_modified, _synced, is_deleted',
+    }).upgrade(async tx => {
+      console.log("Upgrading HurvesthubDB to version 19: Modifying SeedBatches to use supplier_id.");
+      await tx.table('seedBatches').toCollection().modify(item => {
+        if (item.supplier) {
+          delete item.supplier;
+        }
+        if (item.supplier_id === undefined) {
+          item.supplier_id = null;
+        }
+      });
+      console.log("Finished upgrading HurvesthubDB to version 19.");
     });
 
     // Finalize table definitions
@@ -574,6 +684,7 @@ class HurvesthubDB extends Dexie {
     this.trees = this.table('trees');
     this.reminders = this.table('reminders');
     this.seedlingProductionLogs = this.table('seedlingProductionLogs');
+    this.suppliers = this.table('suppliers'); // Finalize suppliers table
   }
 
   async markForSync<T extends { id: string; _last_modified?: number; _synced?: number; is_deleted?: number; deleted_at?: string; }>(
