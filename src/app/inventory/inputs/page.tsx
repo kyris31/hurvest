@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react'; // Removed useEffect, useCallback
-import { useLiveQuery } from 'dexie-react-hooks'; // Import useLiveQuery
-import { db, InputInventory, Supplier } from '@/lib/db'; // Added Supplier
-import { requestPushChanges } from '@/lib/sync'; // Changed from triggerManualSync
+import React, { useState, useMemo } from 'react'; // Added useMemo
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db, InputInventory, Supplier } from '@/lib/db';
+import { requestPushChanges } from '@/lib/sync';
 import InputInventoryList from '@/components/InputInventoryList';
 import InputInventoryForm from '@/components/InputInventoryForm';
 
@@ -12,7 +12,14 @@ export default function InputInventoryPage() {
   const [editingItem, setEditingItem] = useState<InputInventory | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null); // For form submission and fetch errors
+  const [error, setError] = useState<string | null>(null);
+
+  // State for filters
+  const [filterName, setFilterName] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterSupplierId, setFilterSupplierId] = useState('');
+  // State for sorting
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'ascending' | 'descending' } | null>({ key: 'name', direction: 'ascending' });
 
   const inventoryItems = useLiveQuery(
     async () => {
@@ -50,6 +57,68 @@ export default function InputInventoryPage() {
   );
 
   const isLoading = inventoryItems === undefined || suppliers === undefined;
+
+  const uniqueItemTypes = useMemo(() => {
+    if (!inventoryItems) return [];
+    const types = new Set(inventoryItems.map(item => item.type).filter(Boolean) as string[]);
+    return Array.from(types).sort();
+  }, [inventoryItems]);
+
+  const processedInventoryItems = useMemo(() => {
+    if (!inventoryItems || !suppliers) return [];
+
+    const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
+
+    let items = inventoryItems.map(item => {
+      const costPerUnit = (item.total_purchase_cost !== undefined && item.initial_quantity !== undefined && item.initial_quantity > 0)
+        ? (item.total_purchase_cost / item.initial_quantity)
+        : undefined;
+      return {
+        ...item,
+        supplierName: item.supplier_id ? supplierMap.get(item.supplier_id) || 'Unknown Supplier' : 'N/A',
+        costPerUnit: costPerUnit
+      };
+    });
+
+    if (filterName) {
+      items = items.filter(item => item.name.toLowerCase().includes(filterName.toLowerCase()));
+    }
+    if (filterType) {
+      items = items.filter(item => item.type === filterType);
+    }
+    if (filterSupplierId) {
+      items = items.filter(item => item.supplier_id === filterSupplierId);
+    }
+
+    if (sortConfig !== null) {
+      items.sort((a, b) => {
+        const aValue = a[sortConfig.key as keyof typeof a];
+        const bValue = b[sortConfig.key as keyof typeof b];
+
+        if (aValue === undefined || aValue === null) return 1; // put undefined/nulls at the end
+        if (bValue === undefined || bValue === null) return -1;
+
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+          return sortConfig.direction === 'ascending' ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
+        }
+        if (typeof aValue === 'number' && typeof bValue === 'number') {
+          return sortConfig.direction === 'ascending' ? aValue - bValue : bValue - aValue;
+        }
+        // Fallback for other types or mixed types (less ideal)
+        return 0;
+      });
+    }
+
+    return items;
+  }, [inventoryItems, suppliers, filterName, filterType, filterSupplierId, sortConfig]);
+
+  const handleRequestSort = (key: string) => {
+    let direction: 'ascending' | 'descending' = 'ascending';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'ascending') {
+      direction = 'descending';
+    }
+    setSortConfig({ key, direction });
+  };
 
   const handleFormSubmit = async (data: Omit<InputInventory, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'supplier'> | InputInventory) => {
     setIsSubmitting(true);
@@ -152,6 +221,47 @@ export default function InputInventoryPage() {
         </div>
       </header>
 
+      {/* Filter UI */}
+      <div className="my-4 p-4 bg-gray-50 shadow rounded-lg">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label htmlFor="filterName" className="block text-sm font-medium text-gray-700">Filter by Name</label>
+            <input
+              type="text"
+              id="filterName"
+              value={filterName}
+              onChange={(e) => setFilterName(e.target.value)}
+              placeholder="Search name..."
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            />
+          </div>
+          <div>
+            <label htmlFor="filterType" className="block text-sm font-medium text-gray-700">Filter by Type</label>
+            <select
+              id="filterType"
+              value={filterType}
+              onChange={(e) => setFilterType(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            >
+              <option value="">All Types</option>
+              {uniqueItemTypes.map(type => <option key={type} value={type}>{type}</option>)}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="filterSupplier" className="block text-sm font-medium text-gray-700">Filter by Supplier</label>
+            <select
+              id="filterSupplier"
+              value={filterSupplierId}
+              onChange={(e) => setFilterSupplierId(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            >
+              <option value="">All Suppliers</option>
+              {suppliers?.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+
       {showForm && (
         <InputInventoryForm
           initialData={editingItem}
@@ -164,16 +274,19 @@ export default function InputInventoryPage() {
       <div className="mt-4">
         {error && <p className="text-red-500 mb-4 p-3 bg-red-100 rounded-md">{error}</p>}
         {isLoading && <p className="text-center text-gray-500">Loading inventory items...</p>}
-        {!isLoading && !error && inventoryItems && suppliers && (
+        
+        {!isLoading && !error && processedInventoryItems && suppliers && (
           <InputInventoryList
-            inventoryItems={inventoryItems}
-            suppliers={suppliers} // Pass suppliers to the list
+            inventoryItems={processedInventoryItems}
+            suppliers={suppliers}
             onEdit={handleEdit}
             onDelete={handleDelete}
             isDeleting={isDeleting}
+            sortConfig={sortConfig}
+            requestSort={handleRequestSort}
           />
         )}
-        {!isLoading && inventoryItems && suppliers && inventoryItems.length === 0 && !error && (
+        {!isLoading && processedInventoryItems && processedInventoryItems.length === 0 && !error && (
            <div className="text-center py-10">
             <svg className="mx-auto h-12 w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 01-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m3 0h1.125c.621 0 1.125-.504 1.125-1.125V14.25m-17.25 4.5h12.75m0 0V4.125c0-.621-.504-1.125-1.125-1.125H4.5A1.125 1.125 0 003.375 4.125v10.5m12.75 0h3.375c.621 0 1.125-.504 1.125-1.125V4.125c0-.621-.504-1.125-1.125-1.125h-3.375m12.75 0H3.375" />

@@ -5,17 +5,29 @@ import { InputInventory, Supplier } from '@/lib/db'; // Added Supplier
 import { QRCodeCanvas } from 'qrcode.react';
 
 interface InputInventoryListProps {
-  inventoryItems: InputInventory[];
-  suppliers: Supplier[]; // Added suppliers prop
+  inventoryItems: (InputInventory & { supplierName?: string })[]; // Expect enriched items
+  suppliers: Supplier[]; // Still needed if we keep local supplierMap, or for other potential uses
   onEdit: (item: InputInventory) => void;
   onDelete: (id: string) => Promise<void>;
-  isDeleting: string | null; // ID of item being deleted, or null
+  isDeleting: string | null;
+  sortConfig: { key: string; direction: 'ascending' | 'descending' } | null;
+  requestSort: (key: string) => void;
 }
 
-export default function InputInventoryList({ inventoryItems, suppliers, onEdit, onDelete, isDeleting }: InputInventoryListProps) {
-  const activeItems = inventoryItems.filter(item => item.is_deleted !== 1);
-  
-  // Create a map for quick supplier lookup
+export default function InputInventoryList({
+  inventoryItems,
+  suppliers,
+  onEdit,
+  onDelete,
+  isDeleting,
+  sortConfig,
+  requestSort
+}: InputInventoryListProps) {
+  // Filtering for activeItems is now done in the parent component (InputInventoryPage)
+  // const activeItems = inventoryItems.filter(item => item.is_deleted !== 1);
+  const activeItems = inventoryItems; // Assuming parent passes already filtered (for is_deleted) items
+
+  // Create a map for quick supplier lookup - this might be redundant if parent passes supplierName
   const supplierMap = React.useMemo(() =>
     new Map(suppliers.map(s => [s.id, s.name])),
     [suppliers]
@@ -30,13 +42,19 @@ export default function InputInventoryList({ inventoryItems, suppliers, onEdit, 
       <table className="min-w-full bg-white">
         <thead className="bg-green-600 text-white">
           <tr>
-            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Name</th>
-            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Type</th>
-            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Supplier</th>
-            <th className="text-right py-3 px-5 uppercase font-semibold text-sm">Current Qty</th>
-            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Unit</th>
-            <th className="text-right py-3 px-5 uppercase font-semibold text-sm">Total Cost (€)</th>
-            <th className="text-right py-3 px-5 uppercase font-semibold text-sm">Cost/Unit (€)</th>
+            {/* Helper function for sortable headers */}
+            {['name', 'type', 'supplierName', 'current_quantity', 'quantity_unit', 'total_purchase_cost', 'costPerUnit'].map((key) => {
+              const label = key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+              const isSortKey = sortConfig?.key === key;
+              const directionIcon = isSortKey ? (sortConfig.direction === 'ascending' ? '▲' : '▼') : '';
+              const textAlignClass = ['current_quantity', 'total_purchase_cost', 'costPerUnit'].includes(key) ? 'text-right' : 'text-left';
+              
+              return (
+                <th key={key} className={`${textAlignClass} py-3 px-5 uppercase font-semibold text-sm cursor-pointer hover:bg-green-700`} onClick={() => requestSort(key)}>
+                  {label} {directionIcon}
+                </th>
+              );
+            })}
             <th className="text-center py-3 px-5 uppercase font-semibold text-sm">QR Code</th>
             <th className="text-center py-3 px-5 uppercase font-semibold text-sm">Synced</th>
             <th className="text-center py-3 px-5 uppercase font-semibold text-sm">Actions</th>
@@ -47,7 +65,8 @@ export default function InputInventoryList({ inventoryItems, suppliers, onEdit, 
             const costPerUnit = (item.total_purchase_cost !== undefined && item.initial_quantity !== undefined && item.initial_quantity > 0)
               ? (item.total_purchase_cost / item.initial_quantity)
               : undefined;
-            const supplierName = item.supplier_id ? supplierMap.get(item.supplier_id) : null;
+            // supplierName is now expected to be part of the item object from the parent
+            const supplierName = item.supplierName || (item.supplier_id ? supplierMap.get(item.supplier_id) : null);
             const needsRestock = typeof item.minimum_stock_level === 'number' &&
                                  typeof item.current_quantity === 'number' &&
                                  item.current_quantity <= item.minimum_stock_level;
