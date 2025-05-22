@@ -7,8 +7,10 @@ import ReminderForm from '@/components/ReminderForm'; // Import the form
 import { PlusCircleIcon, CheckCircleIcon, XCircleIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/outline';
 
 interface EnrichedReminder extends Reminder {
-  plantingLogInfo?: string; // e.g., "Tomato - Field A (Planted: 2023-03-15)"
+  plantingLogInfo?: string;
   cropName?: string;
+  flockName?: string; // For poultry flock related reminders
+  scheduleName?: string; // For reminders generated from a schedule
 }
 
 export default function RemindersPage() {
@@ -27,11 +29,16 @@ export default function RemindersPage() {
       const plantingLogs = await db.plantingLogs.filter(pl => pl.is_deleted !== 1).toArray();
       const seedBatches = await db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray();
       const crops = await db.crops.filter(c => c.is_deleted !== 1).toArray();
+      const flocks = await db.flocks.filter(f => f.is_deleted !== 1).toArray(); // Fetch flocks
+      const schedules = await db.preventive_measure_schedules.filter(s => s.is_deleted !== 1).toArray(); // Fetch schedules
 
       const enrichedReminders: EnrichedReminder[] = [];
       for (const reminder of allReminders) {
         let plantingLogInfo = 'General Task';
         let cropName = 'N/A';
+        let flockName: string | undefined = undefined;
+        let scheduleName: string | undefined = undefined;
+
         if (reminder.planting_log_id) {
           const pLog = plantingLogs.find(pl => pl.id === reminder.planting_log_id);
           if (pLog) {
@@ -53,7 +60,15 @@ export default function RemindersPage() {
             plantingLogInfo = `${cName} (${pLog.plot_affected || pLog.location_description || 'N/A'}) - Planted: ${new Date(pLog.planting_date).toLocaleDateString()}`;
           }
         }
-        enrichedReminders.push({ ...reminder, plantingLogInfo, cropName });
+        if (reminder.flock_id) {
+          const flock = flocks.find(f => f.id === reminder.flock_id);
+          flockName = flock?.name || 'Unknown Flock';
+        }
+        if (reminder.preventive_measure_schedule_id) {
+          const schedule = schedules.find(s => s.id === reminder.preventive_measure_schedule_id);
+          scheduleName = schedule?.name || 'Unknown Schedule';
+        }
+        enrichedReminders.push({ ...reminder, plantingLogInfo, cropName, flockName, scheduleName });
       }
 
       const upcoming = enrichedReminders.filter(r => r.is_completed === 0).sort((a,b) => new Date(a.reminder_date).getTime() - new Date(b.reminder_date).getTime());
@@ -87,14 +102,47 @@ export default function RemindersPage() {
   const handleToggleComplete = async (reminder: Reminder) => {
     try {
       const now = new Date().toISOString();
+      const newCompletedStatus = reminder.is_completed ? 0 : 1;
+      
       await db.reminders.update(reminder.id, {
-        is_completed: reminder.is_completed ? 0 : 1,
-        completed_at: reminder.is_completed ? undefined : now,
+        is_completed: newCompletedStatus,
+        completed_at: newCompletedStatus === 1 ? now : undefined,
         updated_at: now,
         _synced: 0,
         _last_modified: Date.now()
       });
-      fetchReminders();
+
+      // If just marked as complete, check for recurrence
+      if (newCompletedStatus === 1 && reminder.preventive_measure_schedule_id) {
+        const schedule = await db.preventive_measure_schedules.get(reminder.preventive_measure_schedule_id);
+        if (schedule && schedule.is_recurring === 1 && schedule.recurrence_interval_days && schedule.recurrence_interval_days > 0) {
+          const currentReminderDate = new Date(reminder.reminder_date); // Use original due date as base for next recurrence
+          const nextReminderDate = new Date(currentReminderDate);
+          nextReminderDate.setDate(currentReminderDate.getDate() + schedule.recurrence_interval_days);
+
+          const nextReminderId = crypto.randomUUID();
+          const nextReminderTimestamp = Date.now();
+          const nextReminderToCreate: Reminder = {
+            id: nextReminderId,
+            planting_log_id: reminder.planting_log_id, // Carry over if it was planting related
+            flock_id: reminder.flock_id, // Carry over flock_id
+            preventive_measure_schedule_id: reminder.preventive_measure_schedule_id, // Link to same schedule
+            activity_type: schedule.measure_type, // Use type from schedule
+            reminder_date: nextReminderDate.toISOString().split('T')[0],
+            notes: `Recurring: ${schedule.name}. ${schedule.description || ''}`.trim(),
+            is_completed: 0,
+            completed_at: undefined,
+            created_at: now,
+            updated_at: now,
+            _synced: 0,
+            _last_modified: nextReminderTimestamp,
+            is_deleted: 0,
+          };
+          await db.reminders.add(nextReminderToCreate);
+          console.log(`Generated next recurring reminder: ${nextReminderToCreate.activity_type} on ${nextReminderToCreate.reminder_date} from schedule ${schedule.id}`);
+        }
+      }
+      fetchReminders(); // This will now include the newly generated reminder if any
     } catch (err) {
       console.error("Failed to toggle reminder complete status:", err);
       alert("Failed to update reminder. Please try again.");
@@ -126,18 +174,40 @@ export default function RemindersPage() {
     }
   };
 
-  const renderReminderCard = (reminder: EnrichedReminder) => (
-    <div key={reminder.id} className={`p-4 rounded-lg shadow ${reminder.is_completed ? 'bg-green-50' : 'bg-yellow-50'} border ${reminder.is_completed ? 'border-green-200' : 'border-yellow-200'}`}>
+  const renderReminderCard = (reminder: EnrichedReminder) => {
+    const isOverdue = !reminder.is_completed && new Date(reminder.reminder_date) < new Date();
+    let cardBgColor = 'bg-yellow-50';
+    let borderColor = 'border-yellow-200';
+    let titleColor = 'text-yellow-700';
+
+    if (reminder.is_completed) {
+      cardBgColor = 'bg-green-50';
+      borderColor = 'border-green-200';
+      titleColor = 'text-green-700';
+    } else if (isOverdue) {
+      cardBgColor = 'bg-red-50'; // Overdue color
+      borderColor = 'border-red-300';
+      titleColor = 'text-red-700';
+    }
+
+    return (
+    <div key={reminder.id} className={`p-4 rounded-lg shadow ${cardBgColor} border ${borderColor}`}>
       <div className="flex items-start justify-between">
         <div>
-          <h3 className={`text-md font-semibold ${reminder.is_completed ? 'text-green-700' : 'text-yellow-700'}`}>
-            {reminder.activity_type}
+          <h3 className={`text-md font-semibold ${titleColor}`}>
+            {reminder.activity_type} {isOverdue && !reminder.is_completed && <span className="text-xs font-normal">(Overdue)</span>}
           </h3>
-          <p className="text-sm text-gray-600">
+          <p className={`text-sm ${isOverdue && !reminder.is_completed ? 'text-red-600 font-medium' : 'text-gray-600'}`}>
             Due: {new Date(reminder.reminder_date).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
           </p>
           {reminder.planting_log_id && (
-            <p className="text-xs text-gray-500 mt-1">Target: {reminder.plantingLogInfo}</p>
+            <p className="text-xs text-gray-500 mt-1">Planting Target: {reminder.plantingLogInfo}</p>
+          )}
+          {reminder.flockName && (
+            <p className="text-xs text-gray-500 mt-1">Flock: {reminder.flockName}</p>
+          )}
+          {reminder.scheduleName && (
+            <p className="text-xs text-gray-500 mt-1">From Schedule: {reminder.scheduleName}</p>
           )}
           {reminder.notes && <p className="text-sm text-gray-700 mt-2">Notes: {reminder.notes}</p>}
           {reminder.is_completed && reminder.completed_at && (
@@ -171,6 +241,7 @@ export default function RemindersPage() {
       </div>
     </div>
   );
+}; // Ensure renderReminderCard is properly closed
 
   return (
     // <Layout> // Removed redundant Layout wrapper

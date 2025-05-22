@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db } from '@/lib/db'; // Import db for categories, removed unused InputInventory
+import { db } from '@/lib/db';
+import type { Flock } from '@/lib/db'; // Import Flock type
 import {
     exportSalesToCSV,
     exportInventoryToCSV,
@@ -18,10 +19,12 @@ import {
     exportInputItemUsageLedgerToPDF,
     exportDetailedInputUsageToCSV,
     exportSeedSourceDeclarationToCSV,
-    exportDetailedInputUsageToPDF, // Import new PDF export
-    exportSeedSourceDeclarationToPDF, // Import new PDF export
-    // InventoryReportFilters type might need to be exported from reportUtils if not already
+    exportDetailedInputUsageToPDF,
+    exportSeedSourceDeclarationToPDF,
+    getPoultryFeedEfficiencyData // Import new report function
+    // PoultryFeedEfficiencyReportData type will also be needed from reportUtils
 } from '@/lib/reportUtils';
+import type { PoultryFeedEfficiencyReportData } from '@/lib/reportUtils'; // Import type
 
 // Define a common DateRangeFilters interface if not already exported from reportUtils
 interface DateRangeFilters {
@@ -42,16 +45,44 @@ export default function ReportsPage() {
   const [reportEndDate, setReportEndDate] = useState<string>('');
   
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+  const [availableFlocks, setAvailableFlocks] = useState<Flock[]>([]);
+  const [selectedFlockForEfficiency, setSelectedFlockForEfficiency] = useState<string>('');
+  const [feedEfficiencyData, setFeedEfficiencyData] = useState<PoultryFeedEfficiencyReportData | null>(null);
+  const [isFetchingEfficiency, setIsFetchingEfficiency] = useState(false);
+
 
   useEffect(() => {
     const fetchCategories = async () => {
       const inputs = await db.inputInventory.where('is_deleted').notEqual(1).toArray();
       const types = new Set(inputs.map(i => i.type).filter(Boolean) as string[]);
-      types.add("Seed Batch");
+      types.add("Seed Batch"); // Assuming "Seed Batch" is a distinct category not in input types
       setAvailableCategories(Array.from(types).sort());
     };
+    const fetchFlocks = async () => {
+      const flocks = await db.flocks.where('is_deleted').notEqual(1).toArray();
+      setAvailableFlocks(flocks.sort((a,b) => a.name.localeCompare(b.name)));
+    };
     fetchCategories();
+    fetchFlocks();
   }, []);
+
+  const handleGenerateFeedEfficiencyReport = async () => {
+    if (!selectedFlockForEfficiency) {
+      alert("Please select a flock.");
+      return;
+    }
+    setIsFetchingEfficiency(true);
+    setFeedEfficiencyData(null);
+    try {
+      const data = await getPoultryFeedEfficiencyData(selectedFlockForEfficiency);
+      setFeedEfficiencyData(data);
+    } catch (error) {
+      console.error("Error generating feed efficiency report:", error);
+      alert("Failed to generate feed efficiency report.");
+    } finally {
+      setIsFetchingEfficiency(false);
+    }
+  };
 
   const handleExportWithDateFilters = (
     exportFn: (filters?: DateRangeFilters) => Promise<void>
@@ -273,6 +304,85 @@ export default function ReportsPage() {
                 </button>
               </div>
             </div>
+            
+            {/* Poultry Reports Section */}
+            <div className="border-t pt-6">
+              <h3 className="text-lg font-medium text-gray-700 mb-3">Poultry Reports</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label htmlFor="flockForEfficiency" className="block text-sm font-medium text-gray-700">Select Flock for Feed Efficiency</label>
+                  <select
+                    id="flockForEfficiency"
+                    value={selectedFlockForEfficiency}
+                    onChange={(e) => setSelectedFlockForEfficiency(e.target.value)}
+                    className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                  >
+                    <option value="">-- Select Flock --</option>
+                    {availableFlocks.map(flock => (
+                      <option key={flock.id} value={flock.id}>{flock.name} ({flock.flock_type === 'egg_layer' ? 'Layers' : 'Broilers'})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="md:col-span-2 flex items-end">
+                  <button
+                    onClick={handleGenerateFeedEfficiencyReport}
+                    disabled={!selectedFlockForEfficiency || isFetchingEfficiency}
+                    className="bg-pink-600 hover:bg-pink-700 text-white font-semibold py-2 px-4 rounded shadow-sm transition-colors duration-150 disabled:opacity-50"
+                  >
+                    {isFetchingEfficiency ? 'Generating...' : 'Generate Feed Efficiency Report'}
+                  </button>
+                </div>
+              </div>
+
+              {isFetchingEfficiency && <p className="text-gray-600">Loading efficiency data...</p>}
+              {feedEfficiencyData && (
+                <div className="mt-4 p-4 bg-gray-50 rounded-md shadow">
+                  <h4 className="text-md font-semibold text-gray-800 mb-2">Feed Efficiency for: {feedEfficiencyData.flockName}</h4>
+                  <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <dt className="font-medium text-gray-600">Total Feed Consumed:</dt>
+                    <dd className="text-gray-800">{feedEfficiencyData.totalFeedConsumedKg.toFixed(2)} kg</dd>
+                    
+                    <dt className="font-medium text-gray-600">Total Feed Cost:</dt>
+                    <dd className="text-gray-800">€{feedEfficiencyData.totalFeedCost.toFixed(2)}</dd>
+
+                    <dt className="font-medium text-gray-600">Total Other Costs (Medical, etc.):</dt>
+                    <dd className="text-gray-800">€{feedEfficiencyData.totalOtherCosts.toFixed(2)}</dd>
+                    
+                    <dt className="font-medium text-gray-600">Total Revenue (from sales records):</dt>
+                    <dd className="text-gray-800">€{feedEfficiencyData.totalRevenue.toFixed(2)}</dd>
+
+                    <dt className={`font-bold ${feedEfficiencyData.profitOrLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>Profit / Loss:</dt>
+                    <dd className={`font-bold ${feedEfficiencyData.profitOrLoss >= 0 ? 'text-green-700' : 'text-red-700'}`}>€{feedEfficiencyData.profitOrLoss.toFixed(2)}</dd>
+
+                    {feedEfficiencyData.flockType === 'egg_layer' && typeof feedEfficiencyData.totalEggsProduced === 'number' && (
+                      <>
+                        <dt className="font-medium text-gray-600">Total Eggs Produced:</dt>
+                        <dd className="text-gray-800">{feedEfficiencyData.totalEggsProduced} eggs</dd>
+                        <dt className="font-medium text-gray-600">Feed Cost per Dozen Eggs:</dt>
+                        <dd className="text-gray-800">
+                          {typeof feedEfficiencyData.feedCostPerDozenEggs === 'number'
+                            ? `€${feedEfficiencyData.feedCostPerDozenEggs.toFixed(2)}`
+                            : 'N/A (No eggs produced or feed cost zero)'}
+                        </dd>
+                      </>
+                    )}
+                    {feedEfficiencyData.flockType === 'broiler' && typeof feedEfficiencyData.totalWeightGainKg === 'number' && (
+                       <>
+                        <dt className="font-medium text-gray-600">Total Weight Sold/Gained (approx.):</dt>
+                        <dd className="text-gray-800">{feedEfficiencyData.totalWeightGainKg.toFixed(2)} kg</dd>
+                        <dt className="font-medium text-gray-600">Feed Cost per Kg Meat (approx.):</dt>
+                        <dd className="text-gray-800">
+                          {typeof feedEfficiencyData.feedCostPerKgMeat === 'number'
+                            ? `€${feedEfficiencyData.feedCostPerKgMeat.toFixed(2)}`
+                            : 'N/A (No weight recorded or feed cost zero)'}
+                        </dd>
+                      </>
+                    )}
+                  </dl>
+                </div>
+              )}
+            </div>
+
 
             {/* Example:
             <div>

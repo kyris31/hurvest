@@ -9,7 +9,9 @@ const navItems = [
   { href: '/crops', label: 'Crops' },
   { href: '/planting', label: 'Planting Logs' },
   { href: '/seedling-production', label: 'Seedling Production' },
-  { href: '/inventory', label: 'Inventory' },
+  { href: '/inventory', label: 'Inventory Summary' }, // Clarified label
+  { href: '/inventory/seed-batches', label: 'Seed Batches' }, // New Link
+  { href: '/inventory/inputs', label: 'Input Items' }, // Assuming this page exists or will be added
   { href: '/cultivation', label: 'Cultivation' },
   { href: '/harvests', label: 'Harvests' },
   { href: '/sales', label: 'Sales' },
@@ -17,8 +19,10 @@ const navItems = [
   { href: '/suppliers', label: 'Suppliers' }, // Added Suppliers
   { href: '/trees', label: 'Trees' }, // Added Trees link
   { href: '/reminders', label: 'Reminders' },
+  { href: '/poultry/flocks', label: 'Poultry' },
   { href: '/reports', label: 'Reports' },
-  { href: '/reports/statement-of-account', label: 'Statement of Account' },
+  // { href: '/reports/statement-of-account', label: 'Statement of Account' }, // This might be part of general reports
+  { href: '/settings/poultry-schedules', label: 'Poultry Schedules' },
 ];
 
 const quickAddNavItems = [

@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { db } from '@/lib/db'; // Removed unused imports: Sale, SaleItem, CultivationLog, InputInventory, HarvestLog, PlantingLog
-import { XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts'; // Removed unused BarChart, Bar
+import { db, Reminder, Flock } from '@/lib/db';
+import { XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
+import Link from 'next/link';
 
 interface MetricCardProps {
   title: string;
@@ -25,23 +26,23 @@ interface ChartData {
   profit?: number;
 }
 
-// InventoryValueItem interface is no longer needed here as report is moved
+interface EnrichedPoultryReminder extends Reminder {
+  flockName?: string;
+}
 
 export default function DashboardPage() {
   const [totalRevenue, setTotalRevenue] = useState<number>(0);
-  // KPIs for Sales Performance
   const [numberOfSales, setNumberOfSales] = useState<number>(0);
   const [averageSaleValue, setAverageSaleValue] = useState<number>(0);
   const [topCustomerName, setTopCustomerName] = useState<string>('N/A');
   const [topCustomerValue, setTopCustomerValue] = useState<number>(0);
-
-  // const [totalInputCosts, setTotalInputCosts] = useState<number>(0); // Removed unused state
   const [calculatedCogs, setCalculatedCogs] = useState<number>(0);
   const [revenueByMonth, setRevenueByMonth] = useState<ChartData[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  
+  const [upcomingPoultryReminders, setUpcomingPoultryReminders] = useState<EnrichedPoultryReminder[]>([]);
+  const [isLoading, setIsLoading] = useState(true); 
+  const [error, setError] = useState<string | null>(null); 
 
-  // Date filter states
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
 
@@ -49,12 +50,10 @@ export default function DashboardPage() {
     setIsLoading(true);
     setError(null);
     try {
-      // Base queries
       let salesQuery = db.sales.filter(s => s.is_deleted !== 1);
       let cultivationLogsQuery = db.cultivationLogs.filter(cl => cl.is_deleted !== 1);
       let harvestLogsQuery = db.harvestLogs.filter(h => h.is_deleted !== 1);
 
-      // Apply date filters
       if (startDate) {
         const sDate = new Date(startDate).toISOString().split('T')[0];
         salesQuery = salesQuery.and(s => s.sale_date >= sDate);
@@ -72,23 +71,36 @@ export default function DashboardPage() {
       const cultivationLogs = await cultivationLogsQuery.toArray();
       const harvestLogs = await harvestLogsQuery.toArray();
       
-      // These might not need direct date filtering for current dashboard logic,
-      // but fetch them as they are used in calculations based on the filtered logs.
       const saleItems = await db.saleItems.filter(si => si.is_deleted !== 1).toArray();
       const inputInventory = await db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray();
       const plantingLogs = await db.plantingLogs.filter(p => p.is_deleted !== 1).toArray();
+      const allFlocks = await db.flocks.filter(f => f.is_deleted !== 1).toArray();
 
+      // Fetch Upcoming Poultry Reminders
+      const today = new Date();
+      today.setHours(0,0,0,0); // Start of today for comparison
+      const poultryReminders = await db.reminders
+        .where('is_deleted').notEqual(1)
+        .and(r => r.is_completed === 0 && !!r.flock_id && new Date(r.reminder_date) >= today) 
+        .sortBy('reminder_date');
+      
+      const enrichedPoultryReminders: EnrichedPoultryReminder[] = poultryReminders.slice(0, 5).map(reminder => {
+        const flock = allFlocks.find(f => f.id === reminder.flock_id);
+        return {
+          ...reminder,
+          flockName: flock?.name || 'Unknown Flock'
+        };
+      });
+      setUpcomingPoultryReminders(enrichedPoultryReminders);
 
-      // Calculate Total Revenue & other sales KPIs
       let currentTotalRevenue = 0;
       const salesByCustomer: Record<string, number> = {};
-      const customers = await db.customers.filter(c => c.is_deleted !== 1).toArray(); // Fetch customers
+      const customers = await db.customers.filter(c => c.is_deleted !== 1).toArray();
 
       sales.forEach(sale => {
         const itemsForSale = saleItems.filter(si => si.sale_id === sale.id);
         let currentSaleValue = 0;
         itemsForSale.forEach(item => {
-          // Using pre-discount value for revenue consistency with previous logic
           const itemValue = item.quantity_sold * item.price_per_unit;
           currentTotalRevenue += itemValue;
           currentSaleValue += itemValue;
@@ -119,10 +131,7 @@ export default function DashboardPage() {
         setTopCustomerValue(0);
       }
 
-      // --- Improved COGS Calculation ---
-      // 1. Pre-calculate total costs and harvested quantities for each planting log
       const plantingLogSummaries: Map<string, { totalCosts: number; totalHarvested: number }> = new Map();
-
       for (const pLog of plantingLogs) {
         if (!pLog.id) continue;
         let costsForThisPlanting = 0;
@@ -136,31 +145,25 @@ export default function DashboardPage() {
             }
           }
         });
-
         const totalHarvestedFromThisPlanting = harvestLogs
           .filter(h => h.planting_log_id === pLog.id)
           .reduce((sum, h) => sum + h.quantity_harvested, 0);
-        
         plantingLogSummaries.set(pLog.id, {
           totalCosts: costsForThisPlanting,
           totalHarvested: totalHarvestedFromThisPlanting,
         });
       }
 
-      // 2. Calculate COGS for sold items proportionally
       let proportionalCogs = 0;
       const monthlyRevenueAndCogs: { [key: string]: { revenue: number, cogs: number } } = {};
-
-      for (const sale of sales) { // 'sales' is already filtered by date
+      for (const sale of sales) {
         const itemsForThisSale = saleItems.filter(si => si.sale_id === sale.id);
         let saleMonthCogs = 0;
         let saleMonthRevenue = 0;
-
         for (const saleItem of itemsForThisSale) {
           saleMonthRevenue += saleItem.quantity_sold * saleItem.price_per_unit;
-
           if (saleItem.harvest_log_id) {
-            const harvest = harvestLogs.find(h => h.id === saleItem.harvest_log_id); // 'harvestLogs' is filtered
+            const harvest = harvestLogs.find(h => h.id === saleItem.harvest_log_id);
             if (harvest && harvest.planting_log_id) {
               const summary = plantingLogSummaries.get(harvest.planting_log_id);
               if (summary && summary.totalHarvested > 0) {
@@ -172,7 +175,6 @@ export default function DashboardPage() {
             }
           }
         }
-        // Aggregate for monthly chart
         const month = new Date(sale.sale_date).toLocaleString('default', { month: 'short', year: 'numeric' });
         if (!monthlyRevenueAndCogs[month]) {
             monthlyRevenueAndCogs[month] = { revenue: 0, cogs: 0 };
@@ -181,21 +183,7 @@ export default function DashboardPage() {
         monthlyRevenueAndCogs[month].cogs += saleMonthCogs;
       }
       setCalculatedCogs(proportionalCogs);
-
-      // Calculate Total Input Costs for the filtered period (based on filtered cultivationLogs)
-      // let periodInputCosts = 0; // Removed as it's unused
-      // cultivationLogs.forEach(log => { // 'cultivationLogs' is already filtered by date
-      //   if (log.input_inventory_id && log.input_quantity_used) {
-      //     const inputItem = inputInventory.find(inv => inv.id === log.input_inventory_id);
-      //     if (inputItem && inputItem.total_purchase_cost !== undefined && inputItem.initial_quantity !== undefined && inputItem.initial_quantity > 0) {
-      //       const costPerUnit = inputItem.total_purchase_cost / inputItem.initial_quantity;
-      //       periodInputCosts += log.input_quantity_used * costPerUnit;
-      //     }
-      //   }
-      // });
-      // setTotalInputCosts(periodInputCosts); // Corresponds to removed unused state
       
-      // Prepare Revenue by Month Data using pre-aggregated monthlyRevenueAndCogs
       const sortedMonths = Object.keys(monthlyRevenueAndCogs).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
       const chartData = sortedMonths.map(month => ({
         name: month,
@@ -203,9 +191,6 @@ export default function DashboardPage() {
         costs: monthlyRevenueAndCogs[month].cogs,
         profit: monthlyRevenueAndCogs[month].revenue - monthlyRevenueAndCogs[month].cogs,
       }));
-      // The above 'chartData' (derived from monthlyRevenueAndCogs) is the correct one.
-      // The following block that re-calculates sortedMonths and chartData from an undefined 'monthlyRevenueData'
-      // was the source of the error and is now removed.
       setRevenueByMonth(chartData);
 
     } catch (err) {
@@ -217,9 +202,8 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    // Pass current filter states to fetchData
     fetchData(filterStartDate, filterEndDate);
-  }, [fetchData, filterStartDate, filterEndDate]); // Re-fetch when dates change
+  }, [fetchData, filterStartDate, filterEndDate]);
 
   if (isLoading) {
     return (
@@ -247,7 +231,6 @@ export default function DashboardPage() {
         </div>
       </header>
       <div className="mx-auto max-w-7xl py-6 sm:px-6 lg:px-8">
-        {/* Date Filter Inputs */}
         <div className="mb-6 p-4 bg-white shadow rounded-lg">
           <h2 className="text-lg font-medium text-gray-900 mb-2">Filter by Date Range</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -276,18 +259,17 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6"> {/* Adjusted to 4 columns for new KPIs */}
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6">
           <MetricCard title="Total Revenue" value={`€${totalRevenue.toFixed(2)}`} />
           <MetricCard title="No. of Sales" value={numberOfSales} />
           <MetricCard title="Avg. Sale Value" value={`€${averageSaleValue.toFixed(2)}`} />
           <MetricCard title="Top Customer" value={`${topCustomerName} (€${topCustomerValue.toFixed(2)})`} description="By total sales value" />
         </div>
         
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-2 mb-6"> {/* For COGS and Profit */}
+        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-2 mb-6">
           <MetricCard title="COGS (Sold Items)" value={`€${calculatedCogs.toFixed(2)}`} description="Input costs for sold products" />
           <MetricCard title="Gross Profit" value={`€${(totalRevenue - calculatedCogs).toFixed(2)}`} description="Revenue - COGS for Sold Items" />
         </div>
-
 
         <div className="mt-8 bg-white shadow rounded-lg p-4 sm:p-6">
           <h2 className="text-lg font-medium leading-6 text-gray-900 mb-4">Monthly Trends (Revenue & Est. COGS)</h2>
@@ -310,9 +292,38 @@ export default function DashboardPage() {
           )}
         </div>
         
-        {/* Placeholder for more charts/data - Inventory Value Report section removed */}
+        {/* Upcoming Poultry Reminders Section */}
+        <div className="mt-8 bg-white shadow rounded-lg p-4 sm:p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-medium leading-6 text-gray-900">Upcoming Poultry Reminders</h2>
+            <Link href="/reminders" className="text-sm text-green-600 hover:text-green-800">
+              View All Reminders &rarr;
+            </Link>
+          </div>
+          {isLoading && upcomingPoultryReminders.length === 0 && <p>Loading reminders...</p>}
+          {!isLoading && upcomingPoultryReminders.length === 0 && (
+            <p className="text-center text-gray-500">No upcoming poultry reminders.</p>
+          )}
+          {upcomingPoultryReminders.length > 0 && (
+            <ul className="divide-y divide-gray-200">
+              {upcomingPoultryReminders.map(reminder => (
+                <li key={reminder.id} className="py-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{reminder.activity_type}</p>
+                      <p className="text-sm text-gray-500 truncate">
+                        Flock: {reminder.flockName} - Due: {new Date(reminder.reminder_date).toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
         <div className="mt-8">
-            <p className="text-gray-600">Further financial details and more charts will be added here. Inventory Value report is available under &quot;Reports &amp; Exports&quot;.</p>
+            <p className="text-gray-600">Further financial details and more charts will be added here. Inventory Value report is available under "Reports & Exports".</p>
         </div>
 
       </div>

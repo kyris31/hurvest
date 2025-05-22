@@ -60,6 +60,11 @@ const TABLES_TO_SYNC = [
   { name: 'suppliers', dbTable: db.suppliers }, // Added suppliers
   { name: 'trees', dbTable: db.trees },
   { name: 'input_inventory', dbTable: db.inputInventory },
+  
+  // Poultry Module
+  { name: 'flocks', dbTable: db.flocks },
+  { name: 'flock_records', dbTable: db.flock_records }, // Depends on flocks
+  { name: 'feed_logs', dbTable: db.feed_logs }, // Depends on flocks
 
   // Children with dependencies
   { name: 'seed_batches', dbTable: db.seedBatches }, // Depends on crops
@@ -98,6 +103,11 @@ async function pushChangesToSupabase() {
   const errors: SyncError[] = [];
 
   for (const { name, dbTable } of TABLES_TO_SYNC) {
+    if (!dbTable) {
+      console.error(`[Sync Error] Dexie table instance for "${name}" is undefined. Skipping this table. Ensure DB schema is up to date and DB is open.`);
+      errors.push({ table: name, id: 'N/A', message: `Dexie table instance for "${name}" is undefined.`});
+      continue; // Skip to the next table
+    }
     // Type assertion needed because Dexie.Table<any, any> is not directly assignable
     // Using Dexie.Table<any, string> due to dynamic table iteration. Consider a more specific type if feasible.
     const table = dbTable as Dexie.Table<any, string>;
@@ -303,6 +313,11 @@ async function fetchChangesFromSupabase() {
 
       if (data && data.length > 0) {
         console.log(`Fetched ${data.length} new/updated items from ${name}`);
+        if (!dbTable) { // Should be redundant if checked in push, but good for safety
+          console.error(`[Sync Error] Dexie table instance for "${name}" is undefined during fetch. Skipping.`);
+          errors.push({ table: name, id: 'N/A', message: `Dexie table instance for "${name}" is undefined during fetch.`});
+          continue;
+        }
         // Using Dexie.Table<any, string> due to dynamic table iteration.
         const table = dbTable as Dexie.Table<any, string>;
         

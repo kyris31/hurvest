@@ -20,6 +20,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
   const [currentQuantityDisplay, setCurrentQuantityDisplay] = useState<number | ''>(''); // For read-only display
   const [quantityUnit, setQuantityUnit] = useState('');
   const [totalPurchaseCost, setTotalPurchaseCost] = useState<number | ''>(''); // Renamed from costPerUnit
+  const [minimumStockLevel, setMinimumStockLevel] = useState<number | ''>(''); // New state
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -59,6 +60,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
       setCurrentQuantityDisplay(initialData.current_quantity ?? ''); // For display
       setQuantityUnit(initialData.quantity_unit || '');
       setTotalPurchaseCost(initialData.total_purchase_cost ?? ''); // Use new field name
+      setMinimumStockLevel(initialData.minimum_stock_level ?? ''); // Set new state
       setNotes(initialData.notes || '');
     } else {
       // Reset form
@@ -70,6 +72,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
       setCurrentQuantityDisplay('');
       setQuantityUnit('');
       setTotalPurchaseCost('');
+      setMinimumStockLevel(''); // Reset new state
       setNotes('');
     }
   }, [initialData]);
@@ -91,18 +94,23 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
         setFormError('Total Purchase Cost must be a valid non-negative number if provided.');
         return;
     }
+    if (minimumStockLevel !== '' && (isNaN(minimumStockLevel as number) || Number(minimumStockLevel) < 0)) {
+        setFormError('Minimum Stock Level must be a valid non-negative number if provided.');
+        return;
+    }
 
     const numQuantityPurchased = Number(quantityPurchased);
 
     const inventoryData = {
       name: name.trim(),
       type: type.trim() || undefined,
-      supplier_id: supplierId || undefined, // Use supplier_id
+      supplier_id: supplierId || undefined,
       purchase_date: purchaseDate || undefined,
       initial_quantity: numQuantityPurchased,
-      current_quantity: initialData ? initialData.current_quantity : numQuantityPurchased, // For edit, preserve existing current_quantity; for new, set to initial
+      current_quantity: initialData ? initialData.current_quantity : numQuantityPurchased,
       quantity_unit: quantityUnit.trim() || undefined,
       total_purchase_cost: totalPurchaseCost === '' ? undefined : Number(totalPurchaseCost),
+      minimum_stock_level: minimumStockLevel === '' ? undefined : Number(minimumStockLevel), // Add to data
       notes: notes.trim() || undefined,
     };
     
@@ -261,6 +269,20 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
                 step="any"
               />
             </div>
+          </div>
+
+          <div>
+            <label htmlFor="minimumStockLevel" className="block text-sm font-medium text-gray-700">Minimum Stock Level (for alerts)</label>
+            <input
+              type="number"
+              id="minimumStockLevel"
+              value={minimumStockLevel}
+              onChange={(e) => setMinimumStockLevel(e.target.value === '' ? '' : parseFloat(e.target.value))}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+              disabled={isSubmitting}
+              step="any"
+              min="0"
+            />
           </div>
 
           <div>

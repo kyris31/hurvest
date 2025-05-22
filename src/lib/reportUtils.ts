@@ -1,5 +1,5 @@
 import { db } from './db';
-import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier } from './db';
+import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord } from './db'; // Added Flock, FeedLog, FlockRecord
 import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
@@ -1803,4 +1803,73 @@ export async function exportSeedSourceDeclarationToCSV(filters?: DateRangeFilter
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
         saveAs(blob, `Hurvesthub_Seed_Source_Declaration_${new Date().toISOString().split('T')[0]}.csv`);
     } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
+}
+
+// --- Poultry Feed Efficiency Report Logic ---
+
+export interface PoultryFeedEfficiencyReportData {
+  flockId: string;
+  flockName: string;
+  flockType: 'egg_layer' | 'broiler';
+  totalFeedConsumedKg: number;
+  totalFeedCost: number;
+  totalOtherCosts: number;
+  totalRevenue: number; // New: for sales
+  profitOrLoss: number; // New: calculated
+  totalEggsProduced?: number;
+  totalWeightGainKg?: number;
+  feedCostPerDozenEggs?: number;
+  feedCostPerKgMeat?: number;
+}
+
+export async function getPoultryFeedEfficiencyData(flockId: string): Promise<PoultryFeedEfficiencyReportData | null> {
+  const flock = await db.flocks.get(flockId);
+  if (!flock || flock.is_deleted === 1) return null;
+
+  const feedLogs = await db.feed_logs.where('flock_id').equals(flockId).and(log => log.is_deleted !== 1).toArray();
+  const flockRecords = await db.flock_records.where('flock_id').equals(flockId).and(rec => rec.is_deleted !== 1).toArray();
+
+  const totalFeedConsumedKg = feedLogs.reduce((sum, log) => sum + (log.quantity_fed_kg || 0), 0);
+  const totalFeedCost = feedLogs.reduce((sum, log) => sum + (log.feed_cost || 0), 0);
+  const totalOtherCosts = flockRecords.reduce((sum, record) => sum + (record.cost || 0), 0);
+  const totalRevenue = flockRecords
+    .filter(r => r.record_type === 'cull_sale' || r.record_type === 'egg_sale')
+    .reduce((sum, record) => sum + (record.revenue || 0), 0);
+  
+  const profitOrLoss = totalRevenue - (totalFeedCost + totalOtherCosts);
+
+  let reportData: PoultryFeedEfficiencyReportData = {
+    flockId: flock.id,
+    flockName: flock.name,
+    flockType: flock.flock_type,
+    totalFeedConsumedKg,
+    totalFeedCost,
+    totalOtherCosts,
+    totalRevenue,
+    profitOrLoss,
+  };
+
+  if (flock.flock_type === 'egg_layer') {
+    const totalEggsProduced = flockRecords
+      .filter(r => r.record_type === 'egg_collection')
+      .reduce((sum, r) => sum + (r.quantity || 0), 0);
+    reportData.totalEggsProduced = totalEggsProduced;
+    if (totalEggsProduced > 0) {
+      reportData.feedCostPerDozenEggs = (totalFeedCost / (totalEggsProduced / 12));
+    }
+  } else if (flock.flock_type === 'broiler') {
+    // Sum total weight from 'cull_sale' records using the new 'weight_kg_total' field.
+    // Assumes 'weight_kg_total' stores the actual weight of meat produced/sold in that transaction.
+    const totalWeightProducedKg = flockRecords
+      .filter(r => r.record_type === 'cull_sale' && typeof r.weight_kg_total === 'number')
+      .reduce((sum, r) => sum + (r.weight_kg_total || 0), 0);
+    
+    reportData.totalWeightGainKg = totalWeightProducedKg;
+    if (totalWeightProducedKg > 0) {
+      reportData.feedCostPerKgMeat = totalFeedCost / totalWeightProducedKg;
+    } else {
+      reportData.feedCostPerKgMeat = undefined; // Or 0, if preferred when no weight is recorded
+    }
+  }
+  return reportData;
 }

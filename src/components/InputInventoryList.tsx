@@ -48,12 +48,18 @@ export default function InputInventoryList({ inventoryItems, suppliers, onEdit, 
               ? (item.total_purchase_cost / item.initial_quantity)
               : undefined;
             const supplierName = item.supplier_id ? supplierMap.get(item.supplier_id) : null;
+            const needsRestock = typeof item.minimum_stock_level === 'number' &&
+                                 typeof item.current_quantity === 'number' &&
+                                 item.current_quantity <= item.minimum_stock_level;
             return (
-              <tr key={item.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
+              <tr key={item.id} className={`border-b border-gray-200 hover:bg-green-50 transition-colors duration-150 ${needsRestock ? 'bg-red-50 hover:bg-red-100' : ''}`}>
                 <td className="py-3 px-5">{item.name}</td>
                 <td className="py-3 px-5">{item.type || <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5">{supplierName || <span className="text-gray-400">N/A</span>}</td>
-                <td className="py-3 px-5 text-right">{item.current_quantity ?? <span className="text-gray-400">N/A</span>}</td>
+                <td className={`py-3 px-5 text-right ${needsRestock ? 'text-red-600 font-bold' : ''}`}>
+                  {item.current_quantity ?? <span className="text-gray-400">N/A</span>}
+                  {needsRestock && <span className="ml-1 text-xs">(Low!)</span>}
+                </td>
                 <td className="py-3 px-5">{item.quantity_unit || <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5 text-right">{item.total_purchase_cost !== undefined ? item.total_purchase_cost.toFixed(2) : <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5 text-right">{costPerUnit !== undefined ? costPerUnit.toFixed(2) : <span className="text-gray-400">N/A</span>}</td>
