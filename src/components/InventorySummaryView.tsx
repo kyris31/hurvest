@@ -20,12 +20,16 @@ export default function InventorySummaryView() {
       setIsLoading(true);
       setError(null);
       try {
-        const allInputs = await db.inputInventory
-          .where('is_deleted')
-          .notEqual(1)
-          .and(item => (item.current_quantity || 0) > 0) // Only items with stock
-          .toArray();
+        const [allInputs, allSuppliers] = await Promise.all([
+          db.inputInventory
+            .where('is_deleted')
+            .notEqual(1)
+            .and(item => (item.current_quantity || 0) > 0) // Only items with stock
+            .toArray(),
+          db.suppliers.filter(s => s.is_deleted !== 1).toArray()
+        ]);
 
+        const supplierMap = new Map(allSuppliers.map(s => [s.id, s.name]));
         const groupedByNameAndUnit: Record<string, GroupedInventoryItem> = {};
 
         allInputs.forEach(item => {
@@ -39,8 +43,11 @@ export default function InventorySummaryView() {
             };
           }
           groupedByNameAndUnit[groupKey].totalCurrentQuantity += item.current_quantity || 0;
+          
+          const supplierName = item.supplier_id ? supplierMap.get(item.supplier_id) : undefined;
+          
           groupedByNameAndUnit[groupKey].sources.push({
-            supplier: item.supplier,
+            supplier: supplierName, // Use looked-up name
             quantity: item.current_quantity,
           });
         });
