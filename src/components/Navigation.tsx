@@ -10,8 +10,9 @@ const navItems = [
   { href: '/planting', label: 'Planting Logs' },
   { href: '/seedling-production', label: 'Seedling Production' },
   { href: '/inventory', label: 'Inventory Summary' }, // Clarified label
-  { href: '/inventory/seed-batches', label: 'Seed Batches' }, // New Link
-  { href: '/inventory/inputs', label: 'Input Items' }, // Assuming this page exists or will be added
+  { href: '/inventory/seed-batches', label: 'Seed Batches' },
+  { href: '/inventory/inputs', label: 'Input Items' },
+  { href: '/inventory/supplier-invoices', label: 'Supplier Invoices' }, // New Link
   { href: '/cultivation', label: 'Cultivation' },
   { href: '/harvests', label: 'Harvests' },
   { href: '/sales', label: 'Sales' },

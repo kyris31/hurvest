@@ -2,30 +2,29 @@ import Dexie, { Table, UpdateSpec } from 'dexie';
 import type { IndexableType } from 'dexie';
 
 // Define interfaces for our data structures, mirroring Supabase tables
-// These should ideally be generated from your Supabase schema or shared types
 
 export interface Crop {
   id: string; // UUID
   name: string;
   variety?: string;
   type?: string; // Category like Fruit, Vegetable
-  notes?: string; // Added notes for Crop
-  created_at?: string; // ISOString
-  updated_at?: string; // ISOString
-  _synced?: number; // 0 for false, 1 for true
-  _last_modified?: number; // Timestamp for local changes
-  is_deleted?: number; // 0 for false, 1 for true
-  deleted_at?: string; // ISOString
+  notes?: string; 
+  created_at?: string; 
+  updated_at?: string; 
+  _synced?: number; 
+  _last_modified?: number; 
+  is_deleted?: number; 
+  deleted_at?: string; 
 }
 
 export interface SeedBatch {
   id: string; // UUID
-  crop_id: string; // Foreign key to Crop
+  crop_id: string; 
   batch_code: string;
   source_type?: 'purchased' | 'self_produced'; 
   supplier_id?: string; 
   purchase_date?: string; 
-  date_added_to_inventory?: string; // New field: Date batch was added to stock
+  date_added_to_inventory?: string; 
   initial_quantity?: number;
   current_quantity?: number; 
   quantity_unit?: string; 
@@ -45,8 +44,8 @@ export interface SeedBatch {
 export interface InputInventory {
   id: string; // UUID
   name: string;
-  type?: string; // e.g., "Fertilizer", "Pesticide", "Seedling", "Tool", "Feed"
-  crop_id?: string; // Optional: Link to a specific crop if the input is crop-specific (e.g., purchased seedlings)
+  type?: string; 
+  crop_id?: string; 
   supplier_id?: string; 
   supplier_invoice_number?: string; 
   purchase_date?: string; 
@@ -54,7 +53,7 @@ export interface InputInventory {
   current_quantity?: number;
   quantity_unit?: string;
   total_purchase_cost?: number; 
-  minimum_stock_level?: number; // For restock alerts
+  minimum_stock_level?: number; 
   notes?: string;
   qr_code_data?: string;
   created_at?: string;
@@ -69,7 +68,7 @@ export interface PlantingLog {
   id: string; // UUID
   seedling_production_log_id?: string; 
   seed_batch_id?: string; 
-  input_inventory_id?: string; // For purchased seedlings from InputInventory
+  input_inventory_id?: string; 
   planting_date: string; 
   location_description?: string; 
   plot_affected?: string; 
@@ -85,12 +84,6 @@ export interface PlantingLog {
   deleted_at?: string;
 }
 
-// ... (rest of interfaces: CultivationLog, HarvestLog, Customer, Sale, SaleItem, Invoice, SyncMeta, Tree, Reminder, SeedlingProductionLog, Supplier, Flock, FlockRecord, FeedLog, PreventiveMeasureSchedule - remain unchanged from previous full versions)
-// For brevity, I'll paste them from a known good state if needed, assuming they are correct up to version 25 changes.
-// The critical part is the versioning logic below.
-
-// --- PASTE ALL OTHER INTERFACES HERE ---
-// (Assuming they are correct as per the last full file read)
 export interface CultivationLog {
   id: string; // UUID
   planting_log_id: string; 
@@ -340,7 +333,64 @@ export interface PreventiveMeasureSchedule {
   is_deleted?: number;
   deleted_at?: string;
 }
-// --- END PASTE ALL OTHER INTERFACES HERE ---
+
+export interface SupplierInvoice {
+  id: string; // UUID
+  supplier_id: string; // FK to Suppliers
+  invoice_number: string; // Supplier's invoice number
+  invoice_date: string; // ISOString Date
+  due_date?: string; // ISOString Date
+  total_amount_gross?: number; // Sum of line items before overall discount/VAT
+  discount_amount?: number;
+  discount_percentage?: number;
+  shipping_cost?: number;
+  other_charges?: number;
+  subtotal_after_adjustments?: number; // Gross - Discount + Shipping + Other
+  total_vat_amount?: number;
+  total_amount_net: number; // The final amount payable for the invoice
+  currency?: string; // e.g., EUR
+  status: 'draft' | 'pending_processing' | 'processed' | 'partially_paid' | 'paid' | 'cancelled';
+  notes?: string;
+  file_attachment_url?: string; // URL to a scanned copy
+  created_at?: string;
+  updated_at?: string;
+  _synced?: number;
+  _last_modified?: number;
+  is_deleted?: number;
+  deleted_at?: string;
+}
+
+export interface SupplierInvoiceItem {
+  id: string; // UUID
+  supplier_invoice_id: string; // FK to SupplierInvoices
+  input_inventory_id?: string; // FK to InputInventory (once matched/created)
+  description_from_invoice: string;
+  
+  package_quantity: number; // Number of packages/containers purchased
+  package_unit_of_measure?: string; // e.g., "bottle", "bag", "case"
+
+  item_quantity_per_package?: number; // e.g., 20 (if package_unit_of_measure is 'bottle' and item_unit_of_measure is 'L')
+  item_unit_of_measure?: string; // e.g., "L", "kg", "ml" - the unit of the actual item content
+
+  price_per_package_gross: number; // Price for one package/container
+  
+  line_total_gross?: number; // package_quantity * price_per_package_gross
+  
+  apportioned_discount_amount?: number;
+  apportioned_shipping_cost?: number;
+  apportioned_other_charges?: number;
+  line_subtotal_after_apportionment?: number; // LineTotalGross - ApportionedDiscount + ApportionedShipping + ApportionedOther
+  vat_percentage?: number; 
+  vat_amount_on_line?: number; 
+  line_total_net: number; // Final cost for this line item, basis for InputInventory.total_purchase_cost
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  _synced?: number;
+  _last_modified?: number;
+  is_deleted?: number;
+  deleted_at?: string;
+}
 
 
 export type HurvesthubTableName =
@@ -362,7 +412,10 @@ export type HurvesthubTableName =
   | 'flocks'
   | 'flock_records'
   | 'feed_logs'
-  | 'preventive_measure_schedules';
+  | 'preventive_measure_schedules'
+  | 'supplierInvoices'
+  | 'supplierInvoiceItems';
+  // No change to HurvesthubTableName type itself, just the interface it refers to
 
 export class HurvesthubDB extends Dexie {
   crops!: Table<Crop, string>;
@@ -384,13 +437,13 @@ export class HurvesthubDB extends Dexie {
   flock_records!: Table<FlockRecord, string>;
   feed_logs!: Table<FeedLog, string>;
   preventive_measure_schedules!: Table<PreventiveMeasureSchedule, string>;
+  supplierInvoices!: Table<SupplierInvoice, string>; 
+  supplierInvoiceItems!: Table<SupplierInvoiceItem, string>; 
 
   constructor() {
     super('HurvesthubDB');
     
-    // ... (All versions 1 through 25 remain as they were in the last full file read) ...
-    // For brevity, I'll assume these are correct and start from the changes for v26.
-    // --- PASTE VERSIONS 1-25 HERE ---
+    // Version 1-27 (Copied from previous state)
     this.version(1).stores({
       crops: 'id, name, type, _last_modified, _synced',
       seedBatches: 'id, crop_id, batch_code, _last_modified, _synced',
@@ -464,7 +517,7 @@ export class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
       syncMeta: 'id',
     }).upgrade(async tx => {
-      await tx.table('inputInventory').toCollection().modify((item: any) => { // Use any for old structure
+      await tx.table('inputInventory').toCollection().modify((item: any) => { 
         if (item.cost_per_unit !== undefined && item.initial_quantity !== undefined && item.initial_quantity > 0) {
           item.total_purchase_cost = item.cost_per_unit * item.initial_quantity;
         } else if (item.cost_per_unit !== undefined && (item.initial_quantity === undefined || item.initial_quantity === 0) ) {
@@ -491,7 +544,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(7).stores({
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
-      // ... other tables from v6
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
       plantingLogs: 'id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
@@ -508,7 +560,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(8).stores({
       seedBatches: 'id, crop_id, batch_code, _last_modified, _synced, is_deleted', 
-      // ... other tables from v7
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
@@ -526,7 +577,6 @@ export class HurvesthubDB extends Dexie {
     this.version(9).stores({
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, _last_modified, _synced, is_deleted',
-      // ... other tables from v8
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
@@ -543,7 +593,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(10).stores({
       reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
-      // ... other tables from v9
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, _last_modified, _synced, is_deleted',
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
@@ -560,7 +609,6 @@ export class HurvesthubDB extends Dexie {
     this.version(11).stores({
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, qr_code_data, _last_modified, _synced, is_deleted',
-      // ... other tables from v10
       reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
@@ -579,7 +627,6 @@ export class HurvesthubDB extends Dexie {
     this.version(12).stores({
       seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
       plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
-      // ... other tables from v11
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, qr_code_data, _last_modified, _synced, is_deleted',
       reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
@@ -595,13 +642,12 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => { 
       await tx.table('plantingLogs').toCollection().modify(pl => {
         if (pl.seedling_production_log_id === undefined) pl.seedling_production_log_id = null;
-        if (pl.seed_batch_id === undefined && !pl.seedling_production_log_id) pl.seed_batch_id = null; // Only nullify if seedling_id is also not set
+        if (pl.seed_batch_id === undefined && !pl.seedling_production_log_id) pl.seed_batch_id = null; 
       });
     });
     this.version(13).stores({
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
-      // ... other tables from v12
       seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
       plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
       reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
@@ -626,7 +672,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(14).stores({
       suppliers: 'id, name, _last_modified, _synced, is_deleted',
-      // ... other tables from v13
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
       seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
@@ -644,7 +689,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(15).stores({
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
-      // ... other tables from v14
       suppliers: 'id, name, _last_modified, _synced, is_deleted',
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
@@ -664,7 +708,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(16).stores({
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, qr_code_data, _last_modified, _synced, is_deleted',
-      // ... other tables from v15
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
       suppliers: 'id, name, _last_modified, _synced, is_deleted',
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
@@ -686,7 +729,6 @@ export class HurvesthubDB extends Dexie {
       flocks: 'id, name, flock_type, hatch_date, _last_modified, _synced, is_deleted', 
       flock_records: 'id, flock_id, record_type, record_date, _last_modified, _synced, is_deleted',
       feed_logs: 'id, flock_id, feed_date, feed_type_id, _last_modified, _synced, is_deleted',
-      // ... other tables from v16
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, qr_code_data, _last_modified, _synced, is_deleted',
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
       suppliers: 'id, name, _last_modified, _synced, is_deleted',
@@ -706,7 +748,6 @@ export class HurvesthubDB extends Dexie {
     this.version(18).stores({
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
       feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted', 
-      // ... other tables from v17
       flocks: 'id, name, flock_type, hatch_date, _last_modified, _synced, is_deleted', 
       flock_records: 'id, flock_id, record_type, record_date, _last_modified, _synced, is_deleted', 
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
@@ -729,7 +770,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(19).stores({
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, _last_modified, _synced, is_deleted', 
-      // ... other tables from v18
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
       feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
       flocks: 'id, name, flock_type, hatch_date, _last_modified, _synced, is_deleted',
@@ -752,7 +792,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(20).stores({
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, _last_modified, _synced, is_deleted', 
-      // ... other tables from v19
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
       feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
       flocks: 'id, name, flock_type, hatch_date, _last_modified, _synced, is_deleted',
@@ -776,7 +815,6 @@ export class HurvesthubDB extends Dexie {
     this.version(21).stores({
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted', 
       reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted', 
-      // ... other tables from v20
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
       feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
       flocks: 'id, name, flock_type, hatch_date, _last_modified, _synced, is_deleted',
@@ -799,7 +837,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(22).stores({
       preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
-      // ... other tables from v21
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
       reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
@@ -821,7 +858,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(23).stores({
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
-      // ... other tables from v22
       preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
       reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted', 
@@ -847,7 +883,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(24).stores({
       sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted', 
-      // ... other tables from v23
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
       preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
@@ -875,7 +910,6 @@ export class HurvesthubDB extends Dexie {
     });
     this.version(25).stores({
       sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
-      // ... other tables from v24
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
       preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
@@ -901,21 +935,17 @@ export class HurvesthubDB extends Dexie {
         }
       });
     });
-    // --- END PASTE VERSIONS 1-25 HERE ---
-
-    // Version 26: Added source_type and date_added_to_inventory to SeedBatch table
     this.version(26).stores({
       seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
-      // Re-declare ALL other tables with their LATEST schema strings from version 25
       sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
       preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
-      inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted', // Schema from v25
+      inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted', 
       feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
       suppliers: 'id, name, _last_modified, _synced, is_deleted',
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
-      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
       harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
       customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
@@ -937,12 +967,9 @@ export class HurvesthubDB extends Dexie {
       });
       console.log("Finished upgrading HurvesthubDB to version 26.");
     });
-
-    // Version 27: Added crop_id to InputInventory table and input_inventory_id to PlantingLog
     this.version(27).stores({
-      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted', // Added crop_id
-      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', // Added input_inventory_id
-      // Re-declare ALL other tables with their LATEST schema strings from version 26
+      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted', 
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
       sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
@@ -970,6 +997,32 @@ export class HurvesthubDB extends Dexie {
       });
       console.log("Finished upgrading HurvesthubDB to version 27.");
     });
+
+    // Version 28: Added SupplierInvoices and SupplierInvoiceItems tables
+    this.version(28).stores({
+      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
+      supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted', // Added compound index
+      // Re-declare ALL other tables with their LATEST schema strings from version 27
+      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted', 
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
+      seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
+      flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+      preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+      flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+      feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+      suppliers: 'id, name, _last_modified, _synced, is_deleted',
+      crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
+      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
+      harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
+      customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
+      saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
+      invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted'
+    }); 
 
     // Post-versioning sanity check for table instantiation
     try {
@@ -1035,7 +1088,7 @@ export async function getSyncStatus(): Promise<Record<string, { unsynced: number
         'crops', 'seedBatches', 'inputInventory', 'plantingLogs', 
         'cultivationLogs', 'harvestLogs', 'customers', 'sales', 
         'saleItems', 'invoices', 'trees', 'reminders', 
-        'seedlingProductionLogs', 'suppliers',
+        'seedlingProductionLogs', 'suppliers', 'supplierInvoices', 'supplierInvoiceItems',
         'flocks', 'flock_records', 'feed_logs',
         'preventive_measure_schedules' 
     ];
