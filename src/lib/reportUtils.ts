@@ -214,37 +214,79 @@ interface InventoryReportFilters {
 }
 
 async function getAllInventoryForReport(filters?: InventoryReportFilters): Promise<InventoryReportItem[]> {
+    console.log("[getAllInventoryForReport] Filters received:", JSON.stringify(filters));
+
     let inputsQuery = db.inputInventory.filter(i => i.is_deleted !== 1);
-    let seedBatchesQuery = db.seedBatches.filter(sb => sb.is_deleted !== 1);
+    let seedBatchesQueryInitial = db.seedBatches.filter(sb => sb.is_deleted !== 1); // Initial query for seed batches
 
     if (filters?.category) {
+        console.log(`[getAllInventoryForReport] Filtering by category: ${filters.category}`);
         if (filters.category === 'Seed Batch') {
-            inputsQuery = inputsQuery.and(() => false); // Effectively exclude all general inputs
-        } else { // General input category
+            inputsQuery = inputsQuery.and(() => false);
+        } else {
             inputsQuery = inputsQuery.and(i => i.type === filters.category);
-            seedBatchesQuery = seedBatchesQuery.and(() => false); // Exclude all seed batches
+            seedBatchesQueryInitial = seedBatchesQueryInitial.and(() => false);
         }
     }
+    
+    // Log count before date filtering for the active category
+    if (!filters?.category || filters.category === 'Seed Batch') {
+        const preDateFilterSeedBatches = await db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray();
+        console.log(`[getAllInventoryForReport] Total Seed Batches (is_deleted !== 1): ${preDateFilterSeedBatches.length}`);
+    }
+
+
+    let seedBatchesFilteredByDate = await seedBatchesQueryInitial.toArray(); // Get initial set based on category
+    console.log(`[getAllInventoryForReport] Seed Batches after category filter (before date): ${seedBatchesFilteredByDate.length}`);
+
 
     if (filters?.startDate) {
-        const start = new Date(filters.startDate).toISOString();
-        inputsQuery = inputsQuery.and(i => !!i.purchase_date && i.purchase_date >= start);
-        seedBatchesQuery = seedBatchesQuery.and(sb => !!sb.purchase_date && sb.purchase_date >= start);
+        const startFilter = new Date(filters.startDate).toISOString().split('T')[0];
+        console.log(`[getAllInventoryForReport] Applying startDate filter: ${startFilter}`);
+        inputsQuery = inputsQuery.and(i => {
+            const itemDateSource = i.purchase_date || i.created_at;
+            const itemDate = itemDateSource ? itemDateSource.split('T')[0] : null;
+            return !!itemDate && itemDate >= startFilter;
+        });
+        // Filter seedBatchesFilteredByDate array manually for logging and precision
+        seedBatchesFilteredByDate = seedBatchesFilteredByDate.filter(sb => {
+            const itemDateSource = sb.date_added_to_inventory || sb.purchase_date || sb.created_at;
+            const itemDate = itemDateSource ? itemDateSource.split('T')[0] : null;
+            const passes = !!itemDate && itemDate >= startFilter;
+            // console.log(`[SeedBatch Start Check] ID: ${sb.id}, Date: ${itemDate}, Filter: ${startFilter}, Passes: ${passes}`);
+            return passes;
+        });
     }
     if (filters?.endDate) {
-        const end = new Date(filters.endDate).toISOString();
-        inputsQuery = inputsQuery.and(i => !!i.purchase_date && i.purchase_date <= end);
-        seedBatchesQuery = seedBatchesQuery.and(sb => !!sb.purchase_date && sb.purchase_date <= end);
+        const endFilter = new Date(filters.endDate).toISOString().split('T')[0];
+        console.log(`[getAllInventoryForReport] Applying endDate filter: ${endFilter}`);
+        inputsQuery = inputsQuery.and(i => {
+            const itemDateSource = i.purchase_date || i.created_at;
+            const itemDate = itemDateSource ? itemDateSource.split('T')[0] : null;
+            return !!itemDate && itemDate <= endFilter;
+        });
+        // Filter seedBatchesFilteredByDate array manually
+        seedBatchesFilteredByDate = seedBatchesFilteredByDate.filter(sb => {
+            const itemDateSource = sb.date_added_to_inventory || sb.purchase_date || sb.created_at;
+            const itemDate = itemDateSource ? itemDateSource.split('T')[0] : null;
+            const passes = !!itemDate && itemDate <= endFilter;
+            // console.log(`[SeedBatch End Check] ID: ${sb.id}, Date: ${itemDate}, Filter: ${endFilter}, Passes: ${passes}`);
+            return passes;
+        });
     }
     
-    const [inputs, seedBatches, crops, suppliers] = await Promise.all([
+    const [inputs, crops, suppliers] = await Promise.all([
         inputsQuery.toArray(),
-        seedBatchesQuery.toArray(),
+        // seedBatchesQuery.toArray(), // We use seedBatchesFilteredByDate now
         db.crops.filter(c => c.is_deleted !== 1).toArray(),
-        db.suppliers.filter(s => s.is_deleted !== 1).toArray() // Fetch suppliers
+        db.suppliers.filter(s => s.is_deleted !== 1).toArray()
     ]);
+    const seedBatches = seedBatchesFilteredByDate; // Use the manually filtered array
 
-    const supplierMap = new Map(suppliers.map(s => [s.id, s.name])); // Create supplier map
+    console.log(`[getAllInventoryForReport] Inputs count after all filters: ${inputs.length}`);
+    console.log(`[getAllInventoryForReport] Seed Batches count after all filters: ${seedBatches.length}`);
+
+    const supplierMap = new Map(suppliers.map(s => [s.id, s.name]));
 
     const reportItems: InventoryReportItem[] = [];
 
@@ -923,10 +965,12 @@ export async function exportSalesToPDF(filters?: DateRangeFilters): Promise<void
         alert(`Error generating sales PDF: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
-
 export async function exportInventoryToPDF(filters?: InventoryReportFilters): Promise<void> {
     try {
         const inventoryReportData = await getAllInventoryForReport(filters);
+        console.log(`[exportInventoryToPDF] Received ${inventoryReportData.length} items from getAllInventoryForReport.`);
+        
+        console.log(`[exportInventoryToPDF] Checking length before alert: ${inventoryReportData.length}`); // Log right before the check
         if (inventoryReportData.length === 0) {
             alert("No inventory data available for PDF report with selected filters.");
             return;
