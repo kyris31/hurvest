@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { db, SeedlingProductionLog } from '@/lib/db'; // Removed unused SeedBatch, Crop
-import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
-import Layout from '@/components/Layout';
+import { db, SeedlingProductionLog } from '@/lib/db';
+import { requestPushChanges } from '@/lib/sync';
+// import Layout from '@/components/Layout'; // No longer needed here
 import SeedlingProductionForm from '@/components/SeedlingProductionForm';
 import { PlusCircleIcon } from '@heroicons/react/24/outline';
 
@@ -106,15 +106,15 @@ export default function SeedlingProductionPage() {
   };
 
   if (isLoading) {
-    return <Layout><div className="p-6"><h1 className="text-2xl font-semibold text-gray-900">Seedling Production Logs</h1><p>Loading records...</p></div></Layout>;
+    return <div className="p-6"><h1 className="text-2xl font-semibold text-gray-900">Seedling Production Logs</h1><p>Loading records...</p></div>;
   }
 
   if (error) {
-    return <Layout><div className="p-6"><h1 className="text-2xl font-semibold text-gray-900">Seedling Production Logs</h1><p className="text-red-500">{error}</p></div></Layout>;
+    return <div className="p-6"><h1 className="text-2xl font-semibold text-gray-900">Seedling Production Logs</h1><p className="text-red-500">{error}</p></div>;
   }
 
   return (
-    <Layout>
+    // <Layout> // Removed Layout wrapper
       <div className="p-4 md:p-6">
         <header className="mb-6">
           <div className="flex items-center justify-between">
@@ -198,6 +198,6 @@ export default function SeedlingProductionPage() {
           </table>
         </div>
       </div>
-    </Layout>
+    // </Layout> // Removed Layout wrapper
   );
 }
