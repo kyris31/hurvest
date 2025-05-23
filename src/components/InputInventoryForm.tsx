@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { db, InputInventory, Supplier } from '@/lib/db'; // Added db and Supplier import
+import { db, InputInventory, Supplier, Crop } from '@/lib/db'; // Added Crop
 
 interface InputInventoryFormProps {
   initialData?: InputInventory | null;
-  onSubmit: (data: Omit<InputInventory, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'supplier'> | InputInventory) => Promise<void>;
+  onSubmit: (data: Omit<InputInventory, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | InputInventory) => Promise<void>;
   onCancel: () => void;
   isSubmitting: boolean;
 }
@@ -13,66 +13,63 @@ interface InputInventoryFormProps {
 export default function InputInventoryForm({ initialData, onSubmit, onCancel, isSubmitting }: InputInventoryFormProps) {
   const [name, setName] = useState('');
   const [type, setType] = useState('');
-  const [supplierId, setSupplierId] = useState<string>(''); // Changed to supplierId
+  const [cropId, setCropId] = useState<string>(''); // New state for associated crop
+  const [supplierId, setSupplierId] = useState<string>('');
   const [availableSuppliers, setAvailableSuppliers] = useState<Supplier[]>([]);
+  const [availableCrops, setAvailableCrops] = useState<Crop[]>([]); // New state for crops
   const [purchaseDate, setPurchaseDate] = useState('');
-  const [quantityPurchased, setQuantityPurchased] = useState<number | ''>(''); // Renamed from initialQuantity for clarity in form
-  const [currentQuantityDisplay, setCurrentQuantityDisplay] = useState<number | ''>(''); // For read-only display
+  const [quantityPurchased, setQuantityPurchased] = useState<number | ''>('');
+  const [currentQuantityDisplay, setCurrentQuantityDisplay] = useState<number | ''>('');
   const [quantityUnit, setQuantityUnit] = useState('');
-  const [totalPurchaseCost, setTotalPurchaseCost] = useState<number | ''>(''); // Renamed from costPerUnit
-  const [minimumStockLevel, setMinimumStockLevel] = useState<number | ''>(''); // New state
+  const [totalPurchaseCost, setTotalPurchaseCost] = useState<number | ''>('');
+  const [minimumStockLevel, setMinimumStockLevel] = useState<number | ''>('');
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchSuppliers = async () => {
+    const fetchData = async () => {
       try {
-        // Apply orderBy on the table directly, then filter.
-        // Or, more commonly, if 'is_deleted' is an index, you'd do:
-        // db.suppliers.where('is_deleted').notEqual(1).sortBy('name')
-        // However, sortBy on a collection is for client-side sort after fetch.
-        // For indexedDB efficiency, if 'name' is an index, orderBy is better on the table.
-        // If 'name' is not an index, this will sort client-side after fetching all non-deleted.
         const activeSuppliers = await db.suppliers
           .filter(supplier => supplier.is_deleted !== 1)
-          .sortBy('name'); // sortBy is for collections, sorts client-side
-        // If 'name' is an indexed field and you want DB-side ordering on non-deleted items:
-        // This is more complex as orderBy is on Table/WhereClause.
-        // A simpler approach for now, assuming moderate number of suppliers:
-        // Fetch all non-deleted, then sort client-side.
-        // const allNonDeletedSuppliers = await db.suppliers.where('is_deleted').notEqual(1).toArray();
-        // const activeSuppliers = allNonDeletedSuppliers.sort((a, b) => a.name.localeCompare(b.name));
-        // For simplicity and given useLiveQuery often handles this well, let's use filter().sortBy()
+          .sortBy('name');
         setAvailableSuppliers(activeSuppliers);
+
+        const activeCrops = await db.crops
+          .filter(crop => crop.is_deleted !== 1)
+          .sortBy('name');
+        setAvailableCrops(activeCrops);
+
       } catch (err) {
-        console.error("Failed to fetch suppliers for form:", err);
-        // Optionally set a form error here
+        console.error("Failed to fetch suppliers or crops for form:", err);
+        setFormError("Could not load required data (suppliers/crops).");
       }
     };
-    fetchSuppliers();
+    fetchData();
 
     if (initialData) {
       setName(initialData.name);
       setType(initialData.type || '');
-      setSupplierId(initialData.supplier_id || ''); // Use supplier_id
+      setCropId(initialData.crop_id || ''); // Load crop_id
+      setSupplierId(initialData.supplier_id || '');
       setPurchaseDate(initialData.purchase_date ? initialData.purchase_date.split('T')[0] : '');
       setQuantityPurchased(initialData.initial_quantity ?? '');
-      setCurrentQuantityDisplay(initialData.current_quantity ?? ''); // For display
+      setCurrentQuantityDisplay(initialData.current_quantity ?? '');
       setQuantityUnit(initialData.quantity_unit || '');
-      setTotalPurchaseCost(initialData.total_purchase_cost ?? ''); // Use new field name
-      setMinimumStockLevel(initialData.minimum_stock_level ?? ''); // Set new state
+      setTotalPurchaseCost(initialData.total_purchase_cost ?? '');
+      setMinimumStockLevel(initialData.minimum_stock_level ?? '');
       setNotes(initialData.notes || '');
     } else {
       // Reset form
       setName('');
       setType('');
-      setSupplierId(''); // Reset supplierId
+      setCropId(''); // Reset crop_id
+      setSupplierId('');
       setPurchaseDate('');
       setQuantityPurchased('');
       setCurrentQuantityDisplay('');
       setQuantityUnit('');
       setTotalPurchaseCost('');
-      setMinimumStockLevel(''); // Reset new state
+      setMinimumStockLevel('');
       setNotes('');
     }
   }, [initialData]);
@@ -80,13 +77,13 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormError(null);
-    if (!name.trim() || quantityPurchased === '') {
-      setFormError('Item Name and Quantity Purchased are required.');
+    if (!name.trim() || (quantityPurchased === '' && !initialData) ) { // Quantity purchased only required for new items
+      setFormError('Item Name is required. Quantity Purchased is required for new items.');
       return;
     }
 
-    if (isNaN(quantityPurchased as number) || Number(quantityPurchased) <= 0) {
-        setFormError('Quantity Purchased must be a positive number.');
+    if (quantityPurchased !== '' && (isNaN(quantityPurchased as number) || Number(quantityPurchased) <= 0) && !initialData) {
+        setFormError('Quantity Purchased must be a positive number for new items.');
         return;
     }
     
@@ -99,45 +96,48 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
         return;
     }
 
-    const numQuantityPurchased = Number(quantityPurchased);
+    const numQuantityPurchased = quantityPurchased === '' ? undefined : Number(quantityPurchased);
 
     const inventoryData = {
       name: name.trim(),
       type: type.trim() || undefined,
+      crop_id: cropId || undefined, // Add crop_id
       supplier_id: supplierId || undefined,
       purchase_date: purchaseDate || undefined,
-      initial_quantity: numQuantityPurchased,
+      initial_quantity: initialData ? initialData.initial_quantity : numQuantityPurchased, // Keep initial if editing
       current_quantity: initialData ? initialData.current_quantity : numQuantityPurchased,
       quantity_unit: quantityUnit.trim() || undefined,
       total_purchase_cost: totalPurchaseCost === '' ? undefined : Number(totalPurchaseCost),
-      minimum_stock_level: minimumStockLevel === '' ? undefined : Number(minimumStockLevel), // Add to data
+      minimum_stock_level: minimumStockLevel === '' ? undefined : Number(minimumStockLevel),
       notes: notes.trim() || undefined,
     };
     
     if (initialData?.id) {
-      // When editing, we only update fields that are editable.
-      // initial_quantity and total_purchase_cost are generally set at creation.
-      // If these need to be editable, the form and logic would be more complex (e.g. "New Stock Entry" vs "Edit Item Details")
-      // For now, editing primarily affects name, type, supplier, unit, notes.
-      // Current quantity is updated by usage.
-      // Removed unused initial_quantity, current_quantity, total_purchase_cost from destructuring
-      const { ...editableFields } = inventoryData;
-      const dataToSubmit = {
+      const dataToSubmit: InputInventory = {
         ...initialData,
-        ...editableFields,
-        // Ensure these are not accidentally changed if the form fields were different for edit
-        initial_quantity: initialData.initial_quantity,
-        current_quantity: initialData.current_quantity,
-        total_purchase_cost: initialData.total_purchase_cost
+        name: inventoryData.name,
+        type: inventoryData.type,
+        crop_id: inventoryData.crop_id,
+        supplier_id: inventoryData.supplier_id,
+        purchase_date: inventoryData.purchase_date,
+        // initial_quantity, current_quantity, total_purchase_cost are not typically edited directly here for existing items
+        // They are set on creation or current_quantity is adjusted by usage.
+        // If you want to allow editing these, the form logic needs to be more specific.
+        // For now, we preserve them from initialData if editing.
+        initial_quantity: initialData.initial_quantity, 
+        current_quantity: initialData.current_quantity, // This should be updated by usage, not directly here unless it's a stock adjustment form
+        quantity_unit: inventoryData.quantity_unit,
+        total_purchase_cost: initialData.total_purchase_cost,
+        minimum_stock_level: inventoryData.minimum_stock_level,
+        notes: inventoryData.notes,
       };
       await onSubmit(dataToSubmit);
     } else {
       const newId = crypto.randomUUID();
-      // For new items, current_quantity is same as initial_quantity
-      // And set qr_code_data to the newId
       await onSubmit({
         ...inventoryData,
-        current_quantity: numQuantityPurchased,
+        initial_quantity: numQuantityPurchased, // Ensure this is set for new items
+        current_quantity: numQuantityPurchased, // Current is same as initial for new items
         qr_code_data: newId
       });
     }
@@ -168,7 +168,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
           </div>
 
           <div>
-            <label htmlFor="itemType" className="block text-sm font-medium text-gray-700">Type (e.g., Fertilizer, Pesticide)</label>
+            <label htmlFor="itemType" className="block text-sm font-medium text-gray-700">Type (e.g., Fertilizer, Seedling, Tool)</label>
             <input
               type="text"
               id="itemType"
@@ -176,7 +176,27 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
               onChange={(e) => setType(e.target.value)}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
               disabled={isSubmitting}
+              placeholder="e.g., Seedling, Fertilizer, Feed"
             />
+          </div>
+          
+          <div>
+            <label htmlFor="cropId" className="block text-sm font-medium text-gray-700">Associated Crop (Optional)</label>
+            <select
+              id="cropId"
+              name="cropId"
+              value={cropId}
+              onChange={(e) => setCropId(e.target.value)}
+              className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+              disabled={isSubmitting}
+            >
+              <option value="">Select a Crop (if applicable)</option>
+              {availableCrops.map(c => (
+                <option key={c.id} value={c.id}>
+                  {c.name} {c.variety ? ` - ${c.variety}` : ''}
+                </option>
+              ))}
+            </select>
           </div>
           
           <div>
@@ -212,8 +232,8 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="initialQuantity" className="block text-sm font-medium text-gray-700">
-                Initial Quantity <span className="text-red-500">*</span>
+              <label htmlFor="quantityPurchased" className="block text-sm font-medium text-gray-700">
+                {initialData ? 'Original Qty Purchased' : 'Quantity Purchased'} <span className="text-red-500">{!initialData ? '*' : ''}</span>
               </label>
               <input
                 type="number"
@@ -221,7 +241,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
                 value={quantityPurchased}
                 onChange={(e) => setQuantityPurchased(e.target.value === '' ? '' : parseFloat(e.target.value))}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-                required
+                required={!initialData} // Only required for new items
                 disabled={isSubmitting || !!initialData} // Disable if editing existing item
                 step="any"
               />
@@ -235,19 +255,19 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
                 id="currentQuantityDisplay"
                 value={currentQuantityDisplay}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-gray-100 sm:text-sm"
-                readOnly // Make it strictly read-only
+                readOnly 
                 disabled
                 step="any"
               />
                <p className="text-xs text-gray-500 mt-1">
-                {initialData ? "Updated via Cultivation Logs." : "Set automatically from Quantity Purchased."}
+                {initialData ? "Updated by usage (e.g., cultivation, planting)." : "Set from Quantity Purchased."}
                </p>
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="quantityUnit" className="block text-sm font-medium text-gray-700">Unit (e.g., kg, L, bags)</label>
+              <label htmlFor="quantityUnit" className="block text-sm font-medium text-gray-700">Unit (e.g., kg, L, bags, seedlings)</label>
               <input
                 type="text"
                 id="quantityUnit"
@@ -266,7 +286,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
                 onChange={(e) => setTotalPurchaseCost(e.target.value === '' ? '' : parseFloat(e.target.value))}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
                 disabled={isSubmitting || !!initialData} // Disable if editing existing item
-                step="any"
+                step="any" // Changed from 0.01 to any for flexibility
               />
             </div>
           </div>

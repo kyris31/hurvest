@@ -18,28 +18,77 @@ async function getFullSaleDetails(saleId: string) {
         if (customer?.is_deleted === 1) customer = undefined; // Treat soft-deleted customer as not found for invoice
     }
 
-const detailedItems = await Promise.all(items.map(async (item) => {
+    // Pre-fetch all potentially needed related data to avoid N+1 queries in map
+    const plantingLogIds = items.map(item => item.harvest_log_id ? db.harvestLogs.get(item.harvest_log_id).then(hl => hl?.planting_log_id) : Promise.resolve(undefined))
+                                .filter(id => id !== undefined) as Promise<string>[];
+    const resolvedPlantingLogIds = (await Promise.all(plantingLogIds)).filter(id => id) as string[];
+    
+    const relevantPlantingLogs = resolvedPlantingLogIds.length > 0 ? await db.plantingLogs.where('id').anyOf(resolvedPlantingLogIds).and(pl => pl.is_deleted !== 1).toArray() : [];
+    const plantingLogsMap = new Map(relevantPlantingLogs.map(pl => [pl.id, pl]));
+
+    const seedBatchIdsFromPL = relevantPlantingLogs.map(pl => pl.seed_batch_id).filter(id => id) as string[];
+    const seedlingLogIdsFromPL = relevantPlantingLogs.map(pl => pl.seedling_production_log_id).filter(id => id) as string[];
+    const inventoryIdsFromPL = relevantPlantingLogs.map(pl => pl.input_inventory_id).filter(id => id) as string[];
+
+    const relevantSeedlingLogs = seedlingLogIdsFromPL.length > 0 ? await db.seedlingProductionLogs.where('id').anyOf(seedlingLogIdsFromPL).and(sl => sl.is_deleted !== 1).toArray() : [];
+    const seedlingLogsMap = new Map(relevantSeedlingLogs.map(sl => [sl.id, sl]));
+
+    const seedBatchIdsFromSL = relevantSeedlingLogs.map(sl => sl.seed_batch_id).filter(id => id) as string[];
+    const allSeedBatchIds = [...new Set([...seedBatchIdsFromPL, ...seedBatchIdsFromSL])];
+    
+    const relevantSeedBatches = allSeedBatchIds.length > 0 ? await db.seedBatches.where('id').anyOf(allSeedBatchIds).and(sb => sb.is_deleted !== 1).toArray() : [];
+    const seedBatchesMap = new Map(relevantSeedBatches.map(sb => [sb.id, sb]));
+
+    const relevantInventoryItems = inventoryIdsFromPL.length > 0 ? await db.inputInventory.where('id').anyOf(inventoryIdsFromPL).and(ii => ii.is_deleted !== 1).toArray() : [];
+    const inventoryItemsMap = new Map(relevantInventoryItems.map(ii => [ii.id, ii]));
+
+    const cropIds = [
+        ...relevantPlantingLogs.map(pl => {
+            if (pl.input_inventory_id) return inventoryItemsMap.get(pl.input_inventory_id)?.crop_id;
+            if (pl.seedling_production_log_id) return seedlingLogsMap.get(pl.seedling_production_log_id)?.crop_id;
+            if (pl.seed_batch_id) return seedBatchesMap.get(pl.seed_batch_id)?.crop_id;
+            return undefined;
+        }),
+        ...relevantSeedlingLogs.map(sl => sl.crop_id),
+        ...relevantSeedlingLogs.map(sl => sl.seed_batch_id ? seedBatchesMap.get(sl.seed_batch_id)?.crop_id : undefined),
+        ...relevantSeedBatches.map(sb => sb.crop_id)
+    ].filter(id => id) as string[];
+    
+    const relevantCrops = cropIds.length > 0 ? await db.crops.where('id').anyOf([...new Set(cropIds)]).and(c => c.is_deleted !== 1).toArray() : [];
+    const cropsMap = new Map(relevantCrops.map(c => [c.id, c]));
+
+    const detailedItems = await Promise.all(items.map(async (item) => {
         let productName = 'Unknown Product';
         let productDetails = '';
         if (item.harvest_log_id) {
-            const harvestLog = await db.harvestLogs.where({id: item.harvest_log_id, is_deleted: 0}).first();
-            if (harvestLog) {
-                const plantingLog = await db.plantingLogs.where({id: harvestLog.planting_log_id, is_deleted: 0}).first();
-                if (plantingLog && plantingLog.seed_batch_id) {
-                    const seedBatch = await db.seedBatches.where({id: plantingLog.seed_batch_id, is_deleted: 0}).first();
-                    if (seedBatch) {
-                        const crop = await db.crops.where({id: seedBatch.crop_id, is_deleted: 0}).first();
-                        productName = crop?.name || 'Unknown Crop';
-                        productDetails = `(Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
+            const harvestLog = await db.harvestLogs.get(item.harvest_log_id); // Assuming is_deleted is handled or not relevant here
+            if (harvestLog && harvestLog.is_deleted !== 1) {
+                productDetails = `(Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
+                const plantingLog = plantingLogsMap.get(harvestLog.planting_log_id);
+                
+                if (plantingLog) {
+                    let crop: Crop | undefined;
+                    if (plantingLog.input_inventory_id) {
+                        const invItem = inventoryItemsMap.get(plantingLog.input_inventory_id);
+                        if (invItem && invItem.crop_id) crop = cropsMap.get(invItem.crop_id);
+                    } else if (plantingLog.seedling_production_log_id) {
+                        const seedlingLog = seedlingLogsMap.get(plantingLog.seedling_production_log_id);
+                        if (seedlingLog) {
+                            if (seedlingLog.crop_id) crop = cropsMap.get(seedlingLog.crop_id);
+                            if (!crop && seedlingLog.seed_batch_id) {
+                                const seedBatch = seedBatchesMap.get(seedlingLog.seed_batch_id);
+                                if (seedBatch && seedBatch.crop_id) crop = cropsMap.get(seedBatch.crop_id);
+                            }
+                        }
+                    } else if (plantingLog.seed_batch_id) {
+                        const seedBatch = seedBatchesMap.get(plantingLog.seed_batch_id);
+                        if (seedBatch && seedBatch.crop_id) crop = cropsMap.get(seedBatch.crop_id);
                     }
+                    if (crop) productName = crop.name || 'Unnamed Crop';
                 }
             }
         }
-        return {
-            ...item,
-            productName,
-            productDetails
-        };
+        return { ...item, productName, productDetails };
     }));
 
     return { sale, items: detailedItems, customer };

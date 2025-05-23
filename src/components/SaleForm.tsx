@@ -41,16 +41,16 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
 
   const fetchFormData = useCallback(async () => {
     try {
-      const [customers, harvests, plantingLogs, seedBatches, crops, seedlingLogs] = await Promise.all([
+      const [customers, harvests, plantingLogs, seedBatches, crops, seedlingLogs, inputInventoryData] = await Promise.all([
         db.customers.orderBy('name').filter(c => c.is_deleted !==1).toArray(),
         db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted !== 1).reverse().toArray(),
         db.plantingLogs.filter(p => p.is_deleted !== 1).toArray(),
         db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
         db.crops.filter(c => c.is_deleted !== 1).toArray(),
-        db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(), // Fetch seedling logs
+        db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(),
+        db.inputInventory.filter(ii => ii.is_deleted !== 1 && ii.crop_id != null).toArray(), // Fetch inventory items with a crop_id
       ]);
-      // console.log("SaleForm fetchFormData - Fetched customers:", customers);
-      // console.log("SaleForm fetchFormData - Fetched harvests:", harvests);
+      // console.log("SaleForm fetchFormData - Fetched inputInventoryData:", inputInventoryData);
       // console.log("SaleForm fetchFormData - Fetched plantingLogs:", plantingLogs);
       // console.log("SaleForm fetchFormData - Fetched seedBatches:", seedBatches);
       // console.log("SaleForm fetchFormData - Fetched crops:", crops);
@@ -63,49 +63,37 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
       const enrichedHarvests = harvests.map(h => {
         // console.log(`SaleForm: Processing HL ID: ${h.id}, PL_ID: ${h.planting_log_id}`);
         const pLog = plantingLogs.find(pl => pl.id === h.planting_log_id);
-        let cropName = 'Unknown Crop'; // Default
+        let cropName = 'Unknown Crop';
         
         if (pLog) {
-          // console.log(`SaleForm: For HL ${h.id}, PL found: ${pLog.id}, SB_ID: ${pLog.seed_batch_id}, SeedlingLogID: ${pLog.seedling_production_log_id}`);
-          if (pLog.seedling_production_log_id) { // Prioritize seedling log if present
+          if (pLog.input_inventory_id) {
+            const inventoryItem = inputInventoryData.find(ii => ii.id === pLog.input_inventory_id);
+            if (inventoryItem && inventoryItem.crop_id) {
+              const crop = cropsMap.get(inventoryItem.crop_id);
+              if (crop) cropName = crop.name || 'Unnamed Crop';
+            }
+          } else if (pLog.seedling_production_log_id) {
             const sLog = seedlingLogs.find(sl => sl.id === pLog.seedling_production_log_id);
-            if (sLog && sLog.crop_id) {
-              const crop = cropsMap.get(sLog.crop_id);
-              if (crop) {
-                // console.log(`SaleForm: For SeedlingLog ${sLog.id}, Crop found via direct crop_id: ${crop.name}`);
-                cropName = crop.name || 'Unnamed Crop';
-              } else {
-                // console.log(`SaleForm: For SeedlingLog ${sLog.id}, Crop NOT found (CropID: ${sLog.crop_id})`);
+            if (sLog) {
+              if (sLog.crop_id) {
+                const crop = cropsMap.get(sLog.crop_id);
+                if (crop) cropName = crop.name || 'Unnamed Crop';
               }
-            } else if (sLog) { // Seedling log found but no crop_id, try via its seed_batch_id
+              if (cropName === 'Unknown Crop' && sLog.seed_batch_id) { // Fallback for seedling log
                 const sBatch = seedBatches.find(sb => sb.id === sLog.seed_batch_id);
-                if(sBatch && sBatch.crop_id) {
-                    const crop = cropsMap.get(sBatch.crop_id);
-                    if(crop) cropName = crop.name || 'Unnamed Crop';
+                if (sBatch && sBatch.crop_id) {
+                  const crop = cropsMap.get(sBatch.crop_id);
+                  if (crop) cropName = crop.name || 'Unnamed Crop';
                 }
+              }
             }
-             else {
-              // console.log(`SaleForm: For PL ${pLog.id}, SeedlingLog NOT found (ID: ${pLog.seedling_production_log_id})`);
-            }
-          } else if (pLog.seed_batch_id) { // Fallback to direct seed batch if no seedling log
+          } else if (pLog.seed_batch_id) {
             const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
             if (sBatch && sBatch.crop_id) {
-              // console.log(`SaleForm: For PL ${pLog.id}, SB found: ${sBatch.id}, CropID: ${sBatch.crop_id}`);
               const crop = cropsMap.get(sBatch.crop_id);
-              if (crop) {
-                // console.log(`SaleForm: For SB ${sBatch.id}, Crop found: ${crop.name}`);
-                cropName = crop.name || 'Unnamed Crop';
-              } else {
-                // console.log(`SaleForm: For SB ${sBatch.id}, Crop NOT found (CropID: ${sBatch.crop_id})`);
-              }
-            } else {
-              // console.log(`SaleForm: For PL ${pLog.id}, SB NOT found (SB_ID: ${pLog.seed_batch_id})`);
+              if (crop) cropName = crop.name || 'Unnamed Crop';
             }
-          } else {
-            // console.log(`SaleForm: For PL ${pLog.id}, no seed_batch_id or seedling_production_log_id.`);
           }
-        } else {
-          // console.log(`SaleForm: For HL ${h.id}, PL NOT found (PL_ID: ${h.planting_log_id})`);
         }
         return { ...h, cropName, plantingDate: pLog?.planting_date };
       });

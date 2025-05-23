@@ -28,55 +28,53 @@ export default function HarvestLogForm({ initialData, onSubmit, onCancel, isSubm
   useEffect(() => {
     const fetchFormData = async () => {
       try {
-        const [plantingLogsData, seedBatchesData, cropsData, seedlingLogsData] = await Promise.all([
+        const [plantingLogsData, seedBatchesData, cropsData, seedlingLogsData, inputInventoryData] = await Promise.all([
           db.plantingLogs.orderBy('planting_date').filter(pl => pl.is_deleted !== 1).reverse().toArray(),
           db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
           db.crops.filter(c => c.is_deleted !== 1).toArray(),
-          db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(), // Fetch seedling logs
+          db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(),
+          db.inputInventory.filter(ii => ii.is_deleted !== 1 && ii.crop_id != null).toArray(), // Fetch inventory items with a crop_id
         ]);
 
         const cropsMap = new Map(cropsData.map(crop => [crop.id, crop]));
         const seedBatchesMap = new Map(seedBatchesData.map(batch => [batch.id, batch]));
-        // No need for seedlingLogsMap if we primarily use its crop_id or seed_batch_id
 
-        // console.log(`HarvestLogForm: Fetched plantingLogsData count: ${plantingLogsData.length}`);
         const enrichedPlantingLogs = plantingLogsData.map(pl => {
           let finalCrop: Crop | undefined = undefined;
           let finalSeedBatch: SeedBatch | undefined = undefined;
-          // console.log(`HarvestLogForm: Processing PL ID: ${pl.id}, SeedBatchID: ${pl.seed_batch_id}, SeedlingLogID: ${pl.seedling_production_log_id}`);
 
-          if (pl.seedling_production_log_id) {
+          if (pl.input_inventory_id) { // Highest priority: planted from purchased seedling inventory
+            const inventoryItem = inputInventoryData.find(ii => ii.id === pl.input_inventory_id);
+            if (inventoryItem && inventoryItem.crop_id) {
+              finalCrop = cropsMap.get(inventoryItem.crop_id);
+            }
+          } else if (pl.seedling_production_log_id) { // Next: self-produced seedling
             const seedlingLog = seedlingLogsData.find(sl => sl.id === pl.seedling_production_log_id);
             if (seedlingLog) {
-              // console.log(`HarvestLogForm: For PL ${pl.id}, SeedlingLog found: ${seedlingLog.id}, its crop_id: ${seedlingLog.crop_id}, its sb_id: ${seedlingLog.seed_batch_id}`);
-              if (seedlingLog.crop_id) { // Prefer direct crop_id on seedling log
+              if (seedlingLog.crop_id) {
                 finalCrop = cropsMap.get(seedlingLog.crop_id);
-                // console.log(`HarvestLogForm: Crop from SeedlingLog.crop_id:`, finalCrop?.name);
               }
-              // If crop not found via direct crop_id, or if you want to ensure seed batch details are also linked
-              if (!finalCrop && seedlingLog.seed_batch_id) {
+              if (!finalCrop && seedlingLog.seed_batch_id) { // Fallback to seedbatch of seedling log
                 finalSeedBatch = seedBatchesMap.get(seedlingLog.seed_batch_id);
                 if (finalSeedBatch && finalSeedBatch.crop_id) {
                   finalCrop = cropsMap.get(finalSeedBatch.crop_id);
-                  // console.log(`HarvestLogForm: Crop from SeedlingLog.seed_batch_id -> Crop:`, finalCrop?.name);
                 }
               }
-               if (!finalSeedBatch && seedlingLog.seed_batch_id) { // ensure finalSeedBatch is set if seedlingLog has one
+              if (!finalSeedBatch && seedlingLog.seed_batch_id) {
                 finalSeedBatch = seedBatchesMap.get(seedlingLog.seed_batch_id);
               }
             }
-          } else if (pl.seed_batch_id) { // Direct sow
+          } else if (pl.seed_batch_id) { // Finally: direct sow from seed batch
             finalSeedBatch = seedBatchesMap.get(pl.seed_batch_id);
             if (finalSeedBatch && finalSeedBatch.crop_id) {
               finalCrop = cropsMap.get(finalSeedBatch.crop_id);
-              // console.log(`HarvestLogForm: Crop from PL.seed_batch_id -> Crop:`, finalCrop?.name);
             }
           }
           
           return {
             ...pl,
             cropDetails: finalCrop,
-            seedBatchDetails: finalSeedBatch // Store the relevant seed batch if found through either path
+            seedBatchDetails: finalSeedBatch
           };
         });
         setAvailablePlantingLogs(enrichedPlantingLogs);
