@@ -21,19 +21,21 @@ export interface SeedBatch {
   id: string; // UUID
   crop_id: string; // Foreign key to Crop
   batch_code: string;
-  supplier_id?: string; // Foreign key to Suppliers table
-  purchase_date?: string; // ISOString (Date)
+  source_type?: 'purchased' | 'self_produced';
+  supplier_id?: string;
+  purchase_date?: string;
+  date_added_to_inventory?: string; // New field: Date batch was added to stock
   initial_quantity?: number;
-  current_quantity?: number; // Added to track available quantity
-  quantity_unit?: string; // e.g., 'seeds', 'grams', 'kg'
-  estimated_seeds_per_sowing_unit?: number; 
-  total_purchase_cost?: number; 
-  organic_status?: string; 
+  current_quantity?: number;
+  quantity_unit?: string;
+  estimated_seeds_per_sowing_unit?: number;
+  total_purchase_cost?: number; // (relevant if purchased)
+  organic_status?: string;
   notes?: string;
-  qr_code_data?: string; 
-  created_at?: string; 
-  updated_at?: string; 
-  _synced?: number; 
+  qr_code_data?: string;
+  created_at?: string;
+  updated_at?: string;
+  _synced?: number;
   _last_modified?: number;
   is_deleted?: number;
   deleted_at?: string;
@@ -926,8 +928,7 @@ export class HurvesthubDB extends Dexie {
 
   // Version 25: Added payment_history to Sales table (not indexed)
   this.version(25).stores({
-    sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted', // Schema string remains same as payment_history is not indexed
-    // Re-declare ALL other tables with their LATEST schema strings from version 24
+    sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
     flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
     preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
     flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
@@ -935,7 +936,7 @@ export class HurvesthubDB extends Dexie {
     feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
     suppliers: 'id, name, _last_modified, _synced, is_deleted',
     crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
-    seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+    seedBatches: 'id, crop_id, batch_code, source_type, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', // Added source_type
     plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
     cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
     harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
@@ -955,6 +956,63 @@ export class HurvesthubDB extends Dexie {
     });
     console.log("Finished upgrading HurvesthubDB to version 25.");
   });
+
+  // Version 26: Added source_type to SeedBatch table
+  this.version(26).stores({
+    seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', // Added date_added_to_inventory
+    // Re-declare ALL other tables with their LATEST schema strings from version 25
+    sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
+    flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+    preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+    flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+    inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+    feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+    suppliers: 'id, name, _last_modified, _synced, is_deleted',
+    crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
+    plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+    cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
+    harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
+    customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
+    saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
+    invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
+    syncMeta: 'id',
+    trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+    reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+    seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted'
+  }).upgrade(async tx => {
+    console.log("Upgrading HurvesthubDB to version 26: Adding 'source_type' field to seedBatches table.");
+    await tx.table('seedBatches').toCollection().modify((batch: SeedBatch) => {
+      if (batch.source_type === undefined) {
+        batch.source_type = batch.supplier_id ? 'purchased' : 'self_produced';
+      }
+      // For existing records, date_added_to_inventory will be undefined.
+      // We could try to default it to purchase_date or created_at if they exist.
+      if (batch.date_added_to_inventory === undefined) {
+        batch.date_added_to_inventory = batch.purchase_date || batch.created_at?.split('T')[0];
+      }
+    });
+    console.log("Finished upgrading HurvesthubDB to version 26.");
+  });
+
+  // Version 27: Added date_added_to_inventory to SeedBatch table (already added to schema string in v26, this is for explicit version bump if needed or if schema string was missed)
+  // Actually, since it was added to the schema string in v26, a new version block might only be for data migration if the previous one was insufficient.
+  // Let's assume v26 handles both schema and initial data migration for date_added_to_inventory.
+  // If a separate version was strictly for adding the field if missed in v26 string, it would look like this:
+  /*
+  this.version(27).stores({
+    seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+    // ... other tables
+  }).upgrade(async tx => {
+    console.log("Upgrading HurvesthubDB to version 27: Ensuring 'date_added_to_inventory' in seedBatches.");
+    await tx.table('seedBatches').toCollection().modify((batch: SeedBatch) => {
+      if (batch.date_added_to_inventory === undefined) {
+        batch.date_added_to_inventory = batch.purchase_date || batch.created_at?.split('T')[0];
+      }
+    });
+    console.log("Finished upgrading HurvesthubDB to version 27.");
+  });
+  */
+  // For now, assuming v26 was sufficient. If issues arise, a new version bump (like a v27) would be the way.
 
     // Post-versioning sanity check for table instantiation
     try {

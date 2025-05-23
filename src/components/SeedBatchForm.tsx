@@ -1,12 +1,11 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { SeedBatch, Crop, db, Supplier } from '@/lib/db'; // Added Supplier
+import { SeedBatch, Crop, db, Supplier } from '@/lib/db';
 
 interface SeedBatchFormProps {
   initialData?: SeedBatch | null;
-  // onSubmit will now receive data that includes supplier_id and not supplier string
-  onSubmit: (data: Omit<SeedBatch, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'supplier'> | SeedBatch) => Promise<void>;
+  onSubmit: (data: Omit<SeedBatch, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | SeedBatch) => Promise<void>;
   onCancel: () => void;
   isSubmitting: boolean;
 }
@@ -14,18 +13,18 @@ interface SeedBatchFormProps {
 export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmitting }: SeedBatchFormProps) {
   const [cropId, setCropId] = useState('');
   const [batchCode, setBatchCode] = useState('');
-  // const [variety, setVariety] = useState(''); // Variety is now part of the selected Crop, remove from SeedBatch state
-  const [supplierId, setSupplierId] = useState<string>(''); // Changed from supplier to supplierId
+  const [sourceType, setSourceType] = useState<SeedBatch['source_type']>('purchased');
+  const [supplierId, setSupplierId] = useState<string>('');
   const [purchaseDate, setPurchaseDate] = useState('');
+  const [dateAddedToInventory, setDateAddedToInventory] = useState(''); // Added state
   const [initialQuantity, setInitialQuantity] = useState<number | ''>('');
-  // const [currentQuantity, setCurrentQuantity] = useState<number | ''>(''); // For new batches, current = initial
   const [quantityUnit, setQuantityUnit] = useState('');
   const [totalPurchaseCost, setTotalPurchaseCost] = useState<number | ''>('');
   const [estimatedSeedsPerSowingUnit, setEstimatedSeedsPerSowingUnit] = useState<number | ''>('');
-  const [organicStatus, setOrganicStatus] = useState<string>(''); // New state for organic_status
+  const [organicStatus, setOrganicStatus] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [availableCrops, setAvailableCrops] = useState<Crop[]>([]);
-  const [availableSuppliers, setAvailableSuppliers] = useState<Supplier[]>([]); // Changed to Supplier[]
+  const [availableSuppliers, setAvailableSuppliers] = useState<Supplier[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,10 +32,8 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
       try {
         const cropsData = await db.crops.filter(c => c.is_deleted !== 1).sortBy('name');
         setAvailableCrops(cropsData);
-
         const suppliersData = await db.suppliers.filter(s => s.is_deleted !== 1).sortBy('name');
         setAvailableSuppliers(suppliersData);
-
       } catch (error) {
         console.error("Failed to fetch form data for SeedBatchForm", error);
         setFormError("Could not load required data (crops/suppliers).");
@@ -47,27 +44,41 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
     if (initialData) {
       setCropId(initialData.crop_id);
       setBatchCode(initialData.batch_code);
-      // setVariety(initialData.variety || ''); // Variety removed from SeedBatch
-      setSupplierId(initialData.supplier_id || ''); // Use supplier_id
-      setPurchaseDate(initialData.purchase_date ? initialData.purchase_date.split('T')[0] : '');
+      const currentSourceType = initialData.source_type || 'purchased';
+      setSourceType(currentSourceType);
+
+      if (currentSourceType === 'self_produced') {
+        setSupplierId('');
+        setPurchaseDate('');
+        setTotalPurchaseCost('');
+      } else {
+        setSupplierId(initialData.supplier_id || '');
+        setPurchaseDate(initialData.purchase_date ? initialData.purchase_date.split('T')[0] : '');
+        setTotalPurchaseCost(initialData.total_purchase_cost ?? '');
+      }
+      setDateAddedToInventory(
+        initialData.date_added_to_inventory ? initialData.date_added_to_inventory.split('T')[0] : 
+        (initialData.purchase_date ? initialData.purchase_date.split('T')[0] : 
+        (initialData.created_at ? initialData.created_at.split('T')[0] : new Date().toISOString().split('T')[0]))
+      );
       setInitialQuantity(initialData.initial_quantity ?? '');
-      // setCurrentQuantity(initialData.current_quantity ?? ''); // Load current quantity for editing
       setQuantityUnit(initialData.quantity_unit || '');
-      setTotalPurchaseCost(initialData.total_purchase_cost ?? '');
       setEstimatedSeedsPerSowingUnit(initialData.estimated_seeds_per_sowing_unit ?? '');
-      setOrganicStatus(initialData.organic_status || ''); // Load organic status
+      setOrganicStatus(initialData.organic_status || '');
       setNotes(initialData.notes || '');
     } else {
+      // Defaults for new form
       setCropId('');
       setBatchCode('');
-      setSupplierId(''); // Reset supplierId
+      setSourceType('purchased');
+      setSupplierId(''); 
       setPurchaseDate('');
+      setDateAddedToInventory(new Date().toISOString().split('T')[0]); // Default to today
       setInitialQuantity('');
-      // setCurrentQuantity(''); // Reset for new
       setQuantityUnit('');
       setTotalPurchaseCost('');
       setEstimatedSeedsPerSowingUnit('');
-      setOrganicStatus(''); // Reset organic status
+      setOrganicStatus(''); 
       setNotes('');
     }
   }, [initialData]);
@@ -76,7 +87,6 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
     const now = new Date();
     const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
     const timePart = `${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-    // Simple unique part, can be enhanced (e.g. crop name prefix, random chars)
     const uniquePart = String(Date.now()).slice(-4);
     return `SB-${datePart}-${timePart}-${uniquePart}`;
   };
@@ -87,49 +97,45 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
 
     const finalBatchCode = initialData ? batchCode : generateBatchCode();
 
-    if (!cropId || initialQuantity === '') {
-      setFormError('Crop and Quantity are required.');
+    if (!cropId || initialQuantity === '' || !dateAddedToInventory) {
+      setFormError('Crop, Date Added to Inventory, and Quantity are required.');
       return;
     }
     if (isNaN(Number(initialQuantity))) {
         setFormError('Quantity must be a valid number.');
         return;
     }
-
+    
     const seedBatchData = {
       crop_id: cropId,
       batch_code: finalBatchCode,
-      // variety: variety.trim() || undefined, // Variety removed from SeedBatch data
-      supplier_id: supplierId || undefined, // Use supplier_id
-      purchase_date: purchaseDate || undefined,
+      source_type: sourceType,
+      supplier_id: sourceType === 'purchased' ? (supplierId || undefined) : undefined,
+      purchase_date: sourceType === 'purchased' ? (purchaseDate || undefined) : undefined,
+      date_added_to_inventory: dateAddedToInventory || undefined,
       initial_quantity: Number(initialQuantity),
-      // For new batches, current_quantity is same as initial_quantity
-      // For existing, current_quantity is managed by usage, but form might allow direct edit if needed (not typical for this form)
       current_quantity: initialData?.id ? (initialData.current_quantity ?? Number(initialQuantity)) : Number(initialQuantity),
       quantity_unit: quantityUnit.trim() || undefined,
-      total_purchase_cost: totalPurchaseCost === '' ? undefined : Number(totalPurchaseCost),
+      total_purchase_cost: sourceType === 'purchased' ? (totalPurchaseCost === '' ? undefined : Number(totalPurchaseCost)) : undefined,
       estimated_seeds_per_sowing_unit: estimatedSeedsPerSowingUnit === '' ? undefined : Number(estimatedSeedsPerSowingUnit),
       organic_status: organicStatus.trim() || undefined,
       notes: notes.trim() || undefined,
-      // qr_code_data will be handled below
     };
 
     if (initialData?.id) {
-      // Preserve existing qr_code_data on edit
       const dataToSubmit: SeedBatch = {
         ...initialData,
         ...seedBatchData,
-        batch_code: initialData.batch_code, // Ensure original batch_code is preserved
-        qr_code_data: initialData.qr_code_data // Preserve existing QR code
+        batch_code: initialData.batch_code, 
+        qr_code_data: initialData.qr_code_data 
       };
       await onSubmit(dataToSubmit);
     } else {
       const newId = crypto.randomUUID();
       const dataToSubmit: Omit<SeedBatch, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> & { qr_code_data?: string } = {
         ...seedBatchData,
-        batch_code: finalBatchCode, // Already generated
-        qr_code_data: newId, // Use the new ID as QR code data
-        // current_quantity is already set to initial_quantity in seedBatchData for new items
+        batch_code: finalBatchCode,
+        qr_code_data: newId, 
       };
       await onSubmit(dataToSubmit);
     }
@@ -166,12 +172,9 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
                 if (crop.type) {
                   details.push(crop.type);
                 }
-                if (crop.notes) {
-                  details.push(crop.notes);
-                }
                 if (details.length > 0) {
                   label += ` (${details.join(' - ')})`;
-                } else if (!crop.variety) { // Add N/A if no variety and no details
+                } else if (!crop.variety) { 
                     label += ' (N/A)';
                 }
                 return <option key={crop.id} value={crop.id}>{label}</option>;
@@ -194,58 +197,95 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
               />
             </div>
           )}
-
-          {/* Variety field removed from form as it's part of the selected Crop */}
-          {/*
+          
           <div>
-            <label htmlFor="variety" className="block text-sm font-medium text-gray-700">Variety</label>
-            <input
-              type="text"
-              id="variety"
-              value={variety}
-              onChange={(e) => setVariety(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-              disabled={isSubmitting}
-            />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Source Type</label>
+            <div className="flex items-center space-x-4">
+              <label className="inline-flex items-center">
+                <input
+                  type="radio"
+                  name="sourceType"
+                  value="purchased"
+                  checked={sourceType === 'purchased'}
+                  onChange={() => setSourceType('purchased')}
+                  className="form-radio h-4 w-4 text-green-600"
+                  disabled={isSubmitting}
+                />
+                <span className="ml-2 text-sm text-gray-700">Purchased</span>
+              </label>
+              <label className="inline-flex items-center">
+                <input
+                  type="radio"
+                  name="sourceType"
+                  value="self_produced"
+                  checked={sourceType === 'self_produced'}
+                  onChange={() => {
+                    setSourceType('self_produced');
+                    setSupplierId('');
+                    setPurchaseDate('');
+                    setTotalPurchaseCost('');
+                  }}
+                  className="form-radio h-4 w-4 text-green-600"
+                  disabled={isSubmitting}
+                />
+                <span className="ml-2 text-sm text-gray-700">Self-Produced</span>
+              </label>
+            </div>
           </div>
-          */}
-
+          
           <div>
-            <label htmlFor="supplierId" className="block text-sm font-medium text-gray-700">Supplier</label>
-            <select
-              id="supplierId"
-              name="supplierId"
-              value={supplierId}
-              onChange={(e) => setSupplierId(e.target.value)}
-              className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-              disabled={isSubmitting || availableSuppliers.length === 0}
-            >
-              <option value="">Select a Supplier (Optional)</option>
-              {availableSuppliers.map(s => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
-            {availableSuppliers.length === 0 && <p className="text-xs text-gray-500 mt-1">No suppliers available. Add suppliers via the 'Manage Suppliers' page.</p>}
-          </div>
-
-          <div>
-            <label htmlFor="purchaseDate" className="block text-sm font-medium text-gray-700">Purchase Date</label>
+            <label htmlFor="dateAddedToInventory" className="block text-sm font-medium text-gray-700">Date Added to Inventory <span className="text-red-500">*</span></label>
             <input
               type="date"
-              id="purchaseDate"
-              value={purchaseDate}
-              onChange={(e) => setPurchaseDate(e.target.value)}
+              id="dateAddedToInventory"
+              value={dateAddedToInventory}
+              onChange={(e) => setDateAddedToInventory(e.target.value)}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
               disabled={isSubmitting}
+              required 
             />
           </div>
+
+          {sourceType === 'purchased' && (
+            <>
+              <div>
+                <label htmlFor="supplierId" className="block text-sm font-medium text-gray-700">Supplier</label>
+                <select
+                  id="supplierId"
+                  name="supplierId"
+                  value={supplierId}
+                  onChange={(e) => setSupplierId(e.target.value)}
+                  className="mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                  disabled={isSubmitting || availableSuppliers.length === 0}
+                >
+                  <option value="">Select a Supplier (Optional)</option>
+                  {availableSuppliers.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+                {availableSuppliers.length === 0 && <p className="text-xs text-gray-500 mt-1">No suppliers available.</p>}
+              </div>
+
+              <div>
+                <label htmlFor="purchaseDate" className="block text-sm font-medium text-gray-700">Purchase Date</label>
+                <input
+                  type="date"
+                  id="purchaseDate"
+                  value={purchaseDate}
+                  onChange={(e) => setPurchaseDate(e.target.value)}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                  disabled={isSubmitting}
+                />
+              </div>
+            </>
+          )}
           
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="initialQuantity" className="block text-sm font-medium text-gray-700">
-                Quantity <span className="text-red-500">*</span> {/* Label Change */}
+                Quantity <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -271,7 +311,8 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className={`grid grid-cols-${sourceType === 'purchased' ? '2' : '1'} gap-4`}>
+            {sourceType === 'purchased' && (
             <div>
               <label htmlFor="totalPurchaseCost" className="block text-sm font-medium text-gray-700">Total Purchase Cost (€)</label>
               <input
@@ -285,7 +326,8 @@ export default function SeedBatchForm({ initialData, onSubmit, onCancel, isSubmi
                 min="0"
               />
             </div>
-            <div>
+            )}
+            <div className={sourceType !== 'purchased' ? "col-span-2" : ""}>
               <label htmlFor="estimatedSeedsPerSowingUnit" className="block text-sm font-medium text-gray-700">Est. Seeds / Unit</label>
               <input
                 type="number"
