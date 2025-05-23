@@ -1,21 +1,23 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { db, Sale, SaleItem, Customer, HarvestLog, PlantingLog, SeedBatch, Crop, Invoice } from '@/lib/db';
+import { db, Sale, SaleItem, Customer, Invoice } from '@/lib/db'; // Removed unused HarvestLog etc. for this page directly
 import SaleList from '@/components/SaleList';
 import SaleForm from '@/components/SaleForm';
+import RecordPaymentModal from '@/components/RecordPaymentModal';
 import { downloadInvoicePDF } from '@/lib/invoiceGenerator';
-import { exportSalesToCSV, exportSalesToPDF } from '@/lib/reportUtils'; // Import CSV and PDF export functions
-import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
+import { exportSalesToCSV, exportSalesToPDF } from '@/lib/reportUtils';
+import { requestPushChanges } from '@/lib/sync';
 
 export default function SalesPage() {
   const [sales, setSales] = useState<Sale[]>([]);
-  const [saleItems, setSaleItems] = useState<SaleItem[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [harvestLogs, setHarvestLogs] = useState<HarvestLog[]>([]);
-  const [plantingLogs, setPlantingLogs] = useState<PlantingLog[]>([]);
-  const [seedBatches, setSeedBatches] = useState<SeedBatch[]>([]);
-  const [crops, setCrops] = useState<Crop[]>([]);
+  const [saleItems, setSaleItems] = useState<SaleItem[]>([]); // Still needed for SaleList calculations
+  const [customers, setCustomers] = useState<Customer[]>([]); // Still needed for SaleList
+  // These are fetched but not directly passed to SaleList if it doesn't use them.
+  // const [harvestLogs, setHarvestLogs] = useState<HarvestLog[]>([]);
+  // const [plantingLogs, setPlantingLogs] = useState<PlantingLog[]>([]);
+  // const [seedBatches, setSeedBatches] = useState<SeedBatch[]>([]);
+  // const [crops, setCrops] = useState<Crop[]>([]);
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -23,6 +25,9 @@ export default function SalesPage() {
   const [editingSale, setEditingSale] = useState<(Sale & { items?: SaleItem[] }) | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [showRecordPaymentModal, setShowRecordPaymentModal] = useState(false);
+  const [saleToRecordPaymentFor, setSaleToRecordPaymentFor] = useState<Sale | null>(null);
+  const [isRecordingPayment, setIsRecordingPayment] = useState(false);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -31,26 +36,26 @@ export default function SalesPage() {
         salesData,
         saleItemsData,
         customersData,
-        harvestLogsData,
-        plantingLogsData,
-        seedBatchesData,
-        cropsData
+        // harvestLogsData, // Not directly passed to SaleList if unused by it
+        // plantingLogsData,
+        // seedBatchesData,
+        // cropsData
       ] = await Promise.all([
         db.sales.orderBy('sale_date').filter(s => s.is_deleted === 0).reverse().toArray(),
-        db.saleItems.where('is_deleted').equals(0).toArray(), // No specific order needed for all items, will be filtered per sale
+        db.saleItems.where('is_deleted').equals(0).toArray(),
         db.customers.orderBy('name').filter(c => c.is_deleted === 0).toArray(),
-        db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted === 0).reverse().toArray(),
-        db.plantingLogs.orderBy('planting_date').filter(p => p.is_deleted === 0).reverse().toArray(),
-        db.seedBatches.orderBy('_last_modified').filter(sb => sb.is_deleted === 0).reverse().toArray(),
-        db.crops.orderBy('name').filter(c => c.is_deleted === 0).toArray(),
+        // db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted === 0).reverse().toArray(),
+        // db.plantingLogs.orderBy('planting_date').filter(p => p.is_deleted === 0).reverse().toArray(),
+        // db.seedBatches.orderBy('_last_modified').filter(sb => sb.is_deleted === 0).reverse().toArray(),
+        // db.crops.orderBy('name').filter(c => c.is_deleted === 0).toArray(),
       ]);
       setSales(salesData);
       setSaleItems(saleItemsData);
       setCustomers(customersData);
-      setHarvestLogs(harvestLogsData);
-      setPlantingLogs(plantingLogsData);
-      setSeedBatches(seedBatchesData);
-      setCrops(cropsData);
+      // setHarvestLogs(harvestLogsData);
+      // setPlantingLogs(plantingLogsData);
+      // setSeedBatches(seedBatchesData);
+      // setCrops(cropsData);
       setError(null);
     } catch (err) {
       console.error("Failed to fetch sales data:", err);
@@ -65,15 +70,15 @@ export default function SalesPage() {
   }, [fetchData]);
 
   const handleFormSubmit = async (
-    saleData: Omit<Sale, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'total_amount'>, 
+    saleDataFromForm: Omit<Sale, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'total_amount' | 'payment_history'>, 
     itemsData: Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'>[]
   ) => {
     setIsSubmitting(true);
     setError(null);
     const saleId = editingSale?.id || crypto.randomUUID();
     const now = new Date().toISOString();
+    const currentTimestamp = Date.now();
 
-    // Calculate total amount with discounts
     let calculatedTotalAmount = 0;
     for (const item of itemsData) {
         const quantity = Number(item.quantity_sold);
@@ -98,33 +103,37 @@ export default function SalesPage() {
         if (editingSale) {
           const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(editingSale.id).toArray();
           for (const item of itemsToSoftDelete) {
-            await db.markForSync('saleItems', item.id, {}, true); // Pass table name string
+            await db.markForSync('saleItems', item.id, {}, true);
           }
           const invoiceToSoftDelete = await db.invoices.where('sale_id').equals(editingSale.id).first();
           if (invoiceToSoftDelete) {
-            await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true); // Pass table name string
+            await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true);
           }
           
-          const updatedSaleData: Sale = {
-            ...(editingSale as Sale), // Cast to ensure all Sale properties are there if editingSale is partial
-            ...saleData,
-            total_amount: calculatedTotalAmount, // Update with new discounted total
+          // Construct only the changes for the update operation
+          const saleChanges: Partial<Sale> = {
+            ...saleDataFromForm, // contains payment_method, payment_status, amount_paid from form
+            total_amount: calculatedTotalAmount,
             updated_at: now,
             _synced: 0,
-            _last_modified: Date.now(),
-            is_deleted: 0,
+            _last_modified: currentTimestamp,
+            is_deleted: 0, // Ensure it's not marked deleted if editing
             deleted_at: undefined,
+            // payment_history is managed by RecordPaymentModal, not directly here for edits unless specifically designed
           };
-          await db.sales.update(editingSale.id, updatedSaleData);
-        } else {
+          await db.sales.update(editingSale.id, saleChanges);
+        } else { // Adding new sale
             const newSale: Sale = {
               id: saleId,
-              ...saleData,
-              total_amount: calculatedTotalAmount, // Set new discounted total
+              ...saleDataFromForm,
+              total_amount: calculatedTotalAmount,
+              payment_history: (saleDataFromForm.payment_method && saleDataFromForm.amount_paid && saleDataFromForm.amount_paid > 0) ? 
+                                [{ date: saleDataFromForm.sale_date, amount: Number(saleDataFromForm.amount_paid), method: saleDataFromForm.payment_method, notes: 'Initial payment with sale' }] 
+                                : [], // Initialize payment_history
               created_at: now,
               updated_at: now,
               _synced: 0,
-              _last_modified: Date.now(),
+              _last_modified: currentTimestamp,
               is_deleted: 0,
               deleted_at: undefined,
             };
@@ -140,49 +149,41 @@ export default function SalesPage() {
               created_at: now,
               updated_at: now,
               _synced: 0,
-              _last_modified: Date.now(),
+              _last_modified: currentTimestamp,
               is_deleted: 0,
               deleted_at: undefined,
             });
           }
           
-          // Generate new Invoice (for both add and edit)
-          const invoiceNumber = `INV-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+          const invoiceNumber = `INV-${new Date().getFullYear()}-${String(currentTimestamp).slice(-6)}`;
           const newInvoice: Invoice = {
               id: crypto.randomUUID(),
               sale_id: saleId,
               invoice_number: invoiceNumber,
-              invoice_date: saleData.sale_date,
-              status: 'Draft', // Changed from 'generated' to a valid status
+              invoice_date: saleDataFromForm.sale_date,
+              status: 'Draft',
               pdf_url: `placeholder_invoice_${saleId}.pdf`,
               created_at: now,
               updated_at: now,
               _synced: 0,
-              _last_modified: Date.now(),
+              _last_modified: currentTimestamp,
               is_deleted: 0,
               deleted_at: undefined,
           };
           await db.invoices.add(newInvoice);
         console.log(`Invoice ${invoiceNumber} created locally for sale ${saleId}`);
-        
-      }); // End transaction
+      }); 
       
-      // Trigger PDF download after successful transaction
-      // This happens outside the Dexie transaction
       downloadInvoicePDF(saleId).catch(pdfError => {
         console.error("Error auto-downloading invoice after sale:", pdfError);
-        // Optionally set a non-blocking UI notification about PDF download failure
-        // setError("Sale saved, but failed to auto-download invoice. You can download it manually from the list.");
       });
 
-      // After successful local save, request a push to the server
       console.log("SalesPage: Attempting immediate push after form submit...");
       const pushResult = await requestPushChanges();
       if (pushResult.success) {
         console.log("SalesPage: Immediate push successful.");
       } else {
         console.error("SalesPage: Immediate push failed.", pushResult.errors);
-        // setError("Sale saved locally, but failed to push to server immediately. It will sync later.");
       }
 
       await fetchData();
@@ -198,7 +199,6 @@ export default function SalesPage() {
   };
 
   const handleEdit = async (saleToEdit: Sale) => {
-    // Fetch non-soft-deleted items for the sale to populate the form
     const itemsForSale = await db.saleItems
         .where('sale_id').equals(saleToEdit.id)
         .and(item => item.is_deleted !== 1)
@@ -213,20 +213,18 @@ export default function SalesPage() {
       setIsDeleting(id);
       setError(null);
       try {
-        // Soft delete the sale, its items, and its invoice
         await db.transaction('rw', db.sales, db.saleItems, db.invoices, async () => {
             const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(id).toArray();
             for (const item of itemsToSoftDelete) {
-              await db.markForSync('saleItems', item.id, {}, true); // Pass table name string
+              await db.markForSync('saleItems', item.id, {}, true);
             }
             const invoiceToSoftDelete = await db.invoices.where('sale_id').equals(id).first();
             if (invoiceToSoftDelete) {
-              await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true); // Pass table name string
+              await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true);
             }
-            await db.markForSync('sales', id, {}, true); // Pass table name string
+            await db.markForSync('sales', id, {}, true);
         });
         
-        // After successful local delete marking, request a push to the server
         console.log("SalesPage: Attempting immediate push after delete operation...");
         const deletePushResult = await requestPushChanges();
         if (deletePushResult.success) {
@@ -234,7 +232,6 @@ export default function SalesPage() {
         } else {
           console.error("SalesPage: Immediate push after delete failed.", deletePushResult.errors);
         }
-
         await fetchData();
       } catch (err) {
         console.error("Failed to delete sale:", err);
@@ -246,7 +243,6 @@ export default function SalesPage() {
   };
   
   const handleViewInvoice = async (saleId: string) => {
-    // Call the downloadInvoicePDF function from invoiceGenerator.ts
     try {
         await downloadInvoicePDF(saleId);
     } catch (error) {
@@ -255,6 +251,66 @@ export default function SalesPage() {
     }
   };
 
+  const handleOpenRecordPaymentModal = (sale: Sale) => {
+    setSaleToRecordPaymentFor(sale);
+    setShowRecordPaymentModal(true);
+    setError(null);
+  };
+
+  const handleRecordPaymentSubmit = async (
+    saleId: string, 
+    paymentDetails: { date: string; amount: number; method: Sale['payment_method']; notes?: string }
+  ) => {
+    setIsRecordingPayment(true);
+    setError(null);
+    try {
+      const saleToUpdate = await db.sales.get(saleId);
+      if (!saleToUpdate) {
+        throw new Error("Sale not found to record payment.");
+      }
+
+      const newPaymentEntry = {
+        date: paymentDetails.date,
+        amount: Number(paymentDetails.amount),
+        method: paymentDetails.method,
+        notes: paymentDetails.notes,
+      };
+
+      const updatedPaymentHistory = [...(saleToUpdate.payment_history || []), newPaymentEntry];
+      const newTotalAmountPaid = updatedPaymentHistory.reduce((sum, p) => sum + p.amount, 0);
+      
+      let newPaymentStatus: Sale['payment_status'] = 'partially_paid';
+      if (newTotalAmountPaid >= (saleToUpdate.total_amount || 0)) {
+        newPaymentStatus = 'paid';
+      } else if (newTotalAmountPaid <= 0) { // if total paid becomes 0 or less (e.g. refund scenario not yet handled)
+        newPaymentStatus = 'unpaid';
+      }
+      // If newTotalAmountPaid is > 0 but < total_amount, it remains 'partially_paid'
+
+      const saleUpdates: Partial<Sale> = {
+        amount_paid: newTotalAmountPaid,
+        payment_status: newPaymentStatus,
+        payment_history: updatedPaymentHistory,
+        updated_at: new Date().toISOString(),
+        _synced: 0,
+        _last_modified: Date.now(),
+      };
+
+      await db.sales.update(saleId, saleUpdates);
+      console.log(`Payment recorded for sale ${saleId}. New amount paid: ${newTotalAmountPaid}, Status: ${newPaymentStatus}`);
+      
+      await requestPushChanges();
+      await fetchData(); 
+      setShowRecordPaymentModal(false);
+      setSaleToRecordPaymentFor(null);
+
+    } catch (err) {
+      console.error("Failed to record payment:", err);
+      setError(err instanceof Error ? err.message : "Could not record payment.");
+    } finally {
+      setIsRecordingPayment(false);
+    }
+  };
 
   return (
     <div>
@@ -288,7 +344,7 @@ export default function SalesPage() {
 
       {showForm && (
         <SaleForm
-          initialData={editingSale || undefined} // Pass undefined if null
+          initialData={editingSale || undefined}
           onSubmit={handleFormSubmit}
           onCancel={() => { setShowForm(false); setEditingSale(null); setError(null);}}
           isSubmitting={isSubmitting}
@@ -303,14 +359,12 @@ export default function SalesPage() {
             sales={sales}
             customers={customers}
             saleItems={saleItems}
-            harvestLogs={harvestLogs}
-            plantingLogs={plantingLogs}
-            seedBatches={seedBatches}
-            crops={crops}
+            // Removed unused props: harvestLogs, plantingLogs, seedBatches, crops
             onEdit={handleEdit}
             onDelete={handleDelete}
             isDeleting={isDeleting}
             onViewInvoice={handleViewInvoice}
+            onOpenRecordPaymentModal={handleOpenRecordPaymentModal}
           />
         )}
         {!isLoading && sales.length === 0 && !error && (
@@ -335,6 +389,20 @@ export default function SalesPage() {
           </div>
         )}
       </div>
+
+      {showRecordPaymentModal && saleToRecordPaymentFor && (
+        <RecordPaymentModal
+          isOpen={showRecordPaymentModal}
+          sale={saleToRecordPaymentFor}
+          onClose={() => {
+            setShowRecordPaymentModal(false);
+            setSaleToRecordPaymentFor(null);
+            setError(null);
+          }}
+          onRecordPayment={handleRecordPaymentSubmit}
+          isSubmitting={isRecordingPayment}
+        />
+      )}
     </div>
   );
 }

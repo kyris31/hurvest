@@ -15,26 +15,27 @@ interface SaleListProps {
   sales: EnrichedSale[];
   customers: Customer[];
   // For calculating total if not pre-calculated or for item details display
-  saleItems: SaleItem[]; 
-  harvestLogs: HarvestLog[];
-  plantingLogs: PlantingLog[];
-  seedBatches: SeedBatch[];
-  crops: Crop[];
-  onEdit: (sale: Sale) => void; // Pass the raw Sale object for editing
+  saleItems: SaleItem[];
+  // harvestLogs: HarvestLog[]; // Not directly used for display logic here
+  // plantingLogs: PlantingLog[];
+  // seedBatches: SeedBatch[];
+  // crops: Crop[];
+  onEdit: (sale: Sale) => void;
   onDelete: (id: string) => Promise<void>;
   isDeleting: string | null;
-  onViewInvoice: (saleId: string) => void; // For invoice generation/viewing
+  onViewInvoice: (saleId: string) => void;
+  onOpenRecordPaymentModal: (sale: Sale) => void; // New prop
 }
 
-export default function SaleList({ 
-  sales, 
+export default function SaleList({
+  sales,
   customers,
   saleItems,
-  // harvestLogs, plantingLogs, seedBatches, crops, // Keep if needed for detailed item display
-  onEdit, 
-  onDelete, 
+  onEdit,
+  onDelete,
   isDeleting,
-  onViewInvoice
+  onViewInvoice,
+  onOpenRecordPaymentModal // Destructure new prop
 }: SaleListProps) {
 
   const getCustomerName = (customerId?: string) => {
@@ -141,6 +142,16 @@ export default function SaleList({
                   >
                     PDF
                   </button>
+                  {(sale.payment_status === 'unpaid' || sale.payment_status === 'partially_paid') && (
+                    <button
+                      onClick={() => onOpenRecordPaymentModal(sale)}
+                      className="text-yellow-600 hover:text-yellow-800 font-medium transition-colors duration-150 px-2 py-1 text-xs rounded-md"
+                      title="Record Payment"
+                      disabled={isDeleting === sale.id}
+                    >
+                      Pay
+                    </button>
+                  )}
                   <button
                     onClick={() => onEdit(sale)}
                     className="text-blue-600 hover:text-blue-800 font-medium transition-colors duration-150 px-2 py-1 text-xs rounded-md"

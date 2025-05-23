@@ -130,13 +130,17 @@ export interface Customer {
 
 export interface Sale {
   id: string; // UUID
-  customer_id?: string; 
-  sale_date: string; 
-  total_amount?: number; 
+  customer_id?: string;
+  sale_date: string;
+  total_amount?: number; // This should be calculated from items
+  payment_method?: 'cash' | 'card' | 'bank_transfer' | 'on_account' | 'other';
+  payment_status?: 'paid' | 'unpaid' | 'partially_paid';
+  amount_paid?: number; // Total amount paid so far for this sale
+  payment_history?: { date: string; amount: number; method: Sale['payment_method']; notes?: string }[]; // Array of payment transactions
   notes?: string;
-  created_at?: string; 
-  updated_at?: string; 
-  _synced?: number; 
+  created_at?: string;
+  updated_at?: string;
+  _synced?: number;
   _last_modified?: number;
   is_deleted?: number;
   deleted_at?: string;
@@ -858,8 +862,7 @@ export class HurvesthubDB extends Dexie {
 
   // Version 23: Added species to Flock table
   this.version(23).stores({
-    flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted', // Added species
-    // Re-declare ALL other tables with their LATEST schema strings from version 22
+    flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
     preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
     flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
     inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
@@ -871,7 +874,7 @@ export class HurvesthubDB extends Dexie {
     cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
     harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
     customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
-    sales: 'id, customer_id, sale_date, _last_modified, _synced, is_deleted',
+    sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted', // Added payment fields
     saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
     invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
     syncMeta: 'id',
@@ -880,12 +883,77 @@ export class HurvesthubDB extends Dexie {
     seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted'
   }).upgrade(async tx => {
     console.log("Upgrading HurvesthubDB to version 23: Adding 'species' field to flocks table.");
-    await tx.table('flocks').toCollection().modify(flock => {
+    await tx.table('flocks').toCollection().modify((flock: Flock) => { // Added type for flock
       if (flock.species === undefined) {
-        flock.species = 'chicken'; // Default to chicken if not set
+        flock.species = 'chicken';
       }
     });
     console.log("Finished upgrading HurvesthubDB to version 23.");
+  });
+
+  // Version 24: Added payment_method, payment_status, amount_paid to Sales table
+  this.version(24).stores({
+    sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted', // payment_history is not indexed
+    // Re-declare ALL other tables with their LATEST schema strings from version 23
+    flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+    preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+    flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+    inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+    feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+    suppliers: 'id, name, _last_modified, _synced, is_deleted',
+    crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
+    seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+    plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+    cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
+    harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
+    customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
+    saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
+    invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
+    syncMeta: 'id',
+    trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+    reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+    seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted'
+  }).upgrade(async tx => {
+    console.log("Upgrading HurvesthubDB to version 24: Adding payment fields to sales table.");
+    await tx.table('sales').toCollection().modify((sale: Sale) => {
+      if (sale.payment_method === undefined) sale.payment_method = 'on_account';
+      if (sale.payment_status === undefined) sale.payment_status = 'unpaid';
+      if (sale.amount_paid === undefined) sale.amount_paid = 0;
+      // payment_history will be undefined for old records, which is fine.
+    });
+    console.log("Finished upgrading HurvesthubDB to version 24.");
+  });
+
+  // Version 25: Added payment_history to Sales table (not indexed)
+  this.version(25).stores({
+    sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted', // Schema string remains same as payment_history is not indexed
+    // Re-declare ALL other tables with their LATEST schema strings from version 24
+    flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+    preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+    flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+    inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+    feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+    suppliers: 'id, name, _last_modified, _synced, is_deleted',
+    crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
+    seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+    plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+    cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
+    harvestLogs: 'id, planting_log_id, harvest_date, _last_modified, _synced, is_deleted',
+    customers: 'id, name, customer_type, _last_modified, _synced, is_deleted',
+    saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
+    invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
+    syncMeta: 'id',
+    trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+    reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+    seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted'
+  }).upgrade(async tx => {
+    console.log("Upgrading HurvesthubDB to version 25: Adding 'payment_history' field to sales table (data migration: initialize as empty array if undefined).");
+    await tx.table('sales').toCollection().modify((sale: Sale) => {
+      if (sale.payment_history === undefined) {
+        sale.payment_history = [];
+      }
+    });
+    console.log("Finished upgrading HurvesthubDB to version 25.");
   });
 
     // Post-versioning sanity check for table instantiation

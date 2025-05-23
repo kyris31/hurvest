@@ -15,16 +15,21 @@ interface CustomerListProps {
 export default function CustomerList({ customers, sales, saleItems, onEdit, onDelete, isDeleting }: CustomerListProps) {
   const activeCustomers = customers.filter(customer => customer.is_deleted !== 1);
 
-  const getCustomerTotalSalesValue = (customerId: string): number => {
+  const getCustomerFinancialSummary = (customerId: string) => {
     const customerSales = sales.filter(s => s.customer_id === customerId && s.is_deleted !== 1);
-    let totalValue = 0;
+    let totalSalesAmount = 0;
+    let totalAmountPaid = 0;
+
     customerSales.forEach(sale => {
-      const itemsForSale = saleItems.filter(si => si.sale_id === sale.id && si.is_deleted !== 1);
-      itemsForSale.forEach(item => {
-        totalValue += item.quantity_sold * item.price_per_unit;
-      });
+      totalSalesAmount += sale.total_amount || 0; // total_amount on Sale record is post-discount
+      totalAmountPaid += sale.amount_paid || 0;
     });
-    return totalValue;
+    
+    return {
+      totalSales: totalSalesAmount,
+      totalPaid: totalAmountPaid,
+      outstandingBalance: totalSalesAmount - totalAmountPaid,
+    };
   };
 
   if (activeCustomers.length === 0) {
@@ -40,21 +45,25 @@ export default function CustomerList({ customers, sales, saleItems, onEdit, onDe
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Type</th>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Contact Info</th>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Address</th>
-            <th className="text-right py-3 px-5 uppercase font-semibold text-sm">Total Sales Value</th>
+            <th className="text-right py-3 px-5 uppercase font-semibold text-sm">Total Sales</th>
+            <th className="text-right py-3 px-5 uppercase font-semibold text-sm">Outstanding Balance</th>
             <th className="text-center py-3 px-5 uppercase font-semibold text-sm">Synced</th>
             <th className="text-center py-3 px-5 uppercase font-semibold text-sm">Actions</th>
           </tr>
         </thead>
         <tbody className="text-gray-700">
           {activeCustomers.map((customer) => {
-            const totalSalesValue = getCustomerTotalSalesValue(customer.id);
+            const financialSummary = getCustomerFinancialSummary(customer.id);
             return (
               <tr key={customer.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
                 <td className="py-3 px-5">{customer.name}</td>
                 <td className="py-3 px-5">{customer.customer_type || 'N/A'}</td>
                 <td className="py-3 px-5">{customer.contact_info || 'N/A'}</td>
                 <td className="py-3 px-5 whitespace-pre-wrap">{customer.address || 'N/A'}</td>
-                <td className="py-3 px-5 text-right">€{totalSalesValue.toFixed(2)}</td>
+                <td className="py-3 px-5 text-right">€{financialSummary.totalSales.toFixed(2)}</td>
+                <td className={`py-3 px-5 text-right font-medium ${financialSummary.outstandingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                  €{financialSummary.outstandingBalance.toFixed(2)}
+                </td>
                 <td className="py-3 px-5 text-center">
                   {customer._synced === 0 ? (
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">

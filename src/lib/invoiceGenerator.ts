@@ -93,10 +93,25 @@ export async function generateInvoicePDFBytes(saleId: string): Promise<Uint8Arra
     
     let logoImage;
     try {
-        const logoBytes = await fetch('/logo.png').then(res => res.arrayBuffer());
+        console.log("Attempting to fetch /LOGO.png");
+        const logoRes = await fetch('/LOGO.png');
+        console.log("Logo fetch response status:", logoRes.status, "ok:", logoRes.ok);
+        if (!logoRes.ok) {
+            console.error("Failed to fetch logo. Status:", logoRes.status, logoRes.statusText);
+            throw new Error(`Failed to fetch logo: ${logoRes.status} ${logoRes.statusText}`);
+        }
+        const logoBytes = await logoRes.arrayBuffer();
+        console.log("Logo bytes fetched, length:", logoBytes.byteLength);
+        if (logoBytes.byteLength === 0) {
+            console.error("Fetched logo bytes are empty.");
+            throw new Error("Fetched logo bytes are empty.");
+        }
         logoImage = await pdfDoc.embedPng(logoBytes);
+        console.log("Logo embedded successfully into PDF document. logoImage object:", logoImage ? 'Exists' : 'Does not exist');
     } catch (e) {
-        console.warn("logo.png not found or could not be embedded:", e);
+        console.error("Error during logo processing (fetch or embed):", e);
+        // Keep console.warn for less critical fallback path if needed, but error is more accurate here.
+        // console.warn("LOGO.png not found or could not be embedded:", e);
     }
 
     let y = height - 40; // Adjusted top margin
@@ -178,9 +193,24 @@ const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textS
 
     // Invoice Specific Details (Top Right)
     let invoiceInfoY = y;
-    invoiceInfoY = drawText('Invoice', headerRightX, invoiceInfoY, { font: boldFont, size: 18 }); // Slightly smaller "Invoice"
+    let mainTitle = 'Invoice'; // Default title
+
+    if (sale.payment_status === 'paid') {
+      if (sale.payment_method === 'cash') {
+        mainTitle = 'CASH RECEIPT';
+      } else {
+        mainTitle = 'PAID INVOICE'; // Or "RECEIPT"
+      }
+    } else { // Status is 'unpaid', 'partially_paid', or undefined
+      if (sale.payment_method === 'cash') {
+        mainTitle = 'CASH SALE'; // Indicates a cash transaction not yet fully settled as 'paid'
+      }
+      // Otherwise, it remains 'Invoice' for other methods if not fully paid
+    }
+
+    invoiceInfoY = drawText(mainTitle, headerRightX, invoiceInfoY, { font: boldFont, size: 18 });
     invoiceInfoY -= 3;
-    invoiceInfoY = drawText(`Invoice #: ${invoiceRecord.invoice_number}`, headerRightX, invoiceInfoY, { font: boldFont, size: 9 });
+    invoiceInfoY = drawText(`Number: ${invoiceRecord.invoice_number}`, headerRightX, invoiceInfoY, { font: boldFont, size: 9 });
     invoiceInfoY = drawText(`Date: ${new Date(invoiceRecord.invoice_date).toLocaleDateString()}`, headerRightX, invoiceInfoY, { size: 9 });
     invoiceInfoY = drawText(`Sale ID: ${sale.id.substring(0,13)}...`, headerRightX, invoiceInfoY, { size: 9 });
 
@@ -296,13 +326,28 @@ const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textS
     drawText(totalText, width - margin - boldFont.widthOfTextAtSize(totalText, 12), y, { font: boldFont, size: 12 });
     y -= lineheight;
 
+    // Payment Status & Method (Optional display on invoice)
+    if (sale.payment_status) {
+        const statusText = `Payment Status: ${sale.payment_status.charAt(0).toUpperCase() + sale.payment_status.slice(1)}`;
+        y = drawText(statusText, margin, y, { size: 9, font: boldFont });
+    }
+    if (sale.payment_method) {
+        const methodText = `Payment Method: ${sale.payment_method.charAt(0).toUpperCase() + sale.payment_method.slice(1).replace('_', ' ')}`;
+        y = drawText(methodText, margin, y, { size: 9 });
+    }
+     if (sale.payment_status === 'paid' && sale.amount_paid && sale.amount_paid > 0) {
+        const paidText = `Amount Paid: €${sale.amount_paid.toFixed(2)}`;
+        drawText(paidText, width - margin - font.widthOfTextAtSize(paidText, 9) - 5, y + (sale.payment_method ? 0 : lineheight*0.8) , { size: 9 }); // Align near total if space
+    }
+
+
     // Notes
     if (sale.notes) {
-        y -= lineheight;
-        y = drawText('Notes:', margin, y, { font: boldFont, size: 10 });
-        sale.notes.split('\n').forEach(line => {
-            y = drawText(line, margin, y, { size: 10 });
-        });
+      y -= lineheight * (sale.payment_status || sale.payment_method ? 0.5 : 1.5) ; // Adjust spacing based on whether payment info was shown
+      y = drawText('Notes:', margin, y, { font: boldFont, size: 10 });
+      sale.notes.split('\n').forEach(line => {
+        y = drawText(line, margin, y, { size: 10 });
+      });
     }
 
     // Footer

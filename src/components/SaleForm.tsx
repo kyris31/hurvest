@@ -20,7 +20,10 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
   const [saleDate, setSaleDate] = useState('');
   const [customerId, setCustomerId] = useState<string | undefined>(undefined);
   const [notes, setNotes] = useState('');
-  // Extend SaleItem in state to include discount_type and discount_value for the form
+  const [paymentMethod, setPaymentMethod] = useState<Sale['payment_method']>('on_account');
+  const [paymentStatus, setPaymentStatus] = useState<Sale['payment_status']>('unpaid');
+  const [amountPaid, setAmountPaid] = useState<number | ''>('');
+
   const [items, setItems] = useState<(Partial<SaleItem & {
     key: string,
     availableQuantity?: number,
@@ -38,35 +41,74 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
 
   const fetchFormData = useCallback(async () => {
     try {
-      const [customers, harvests, plantingLogs, seedBatches, crops] = await Promise.all([
+      const [customers, harvests, plantingLogs, seedBatches, crops, seedlingLogs] = await Promise.all([
         db.customers.orderBy('name').filter(c => c.is_deleted !==1).toArray(),
         db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted !== 1).reverse().toArray(),
-        db.plantingLogs.filter(p => p.is_deleted !== 1).toArray(), // No specific order, ensure filtered
-        db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(), // Ensure filtered
-        db.crops.filter(c => c.is_deleted !== 1).toArray(), // Ensure filtered
+        db.plantingLogs.filter(p => p.is_deleted !== 1).toArray(),
+        db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
+        db.crops.filter(c => c.is_deleted !== 1).toArray(),
+        db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(), // Fetch seedling logs
       ]);
-      console.log("SaleForm fetchFormData - Fetched customers:", customers);
-      console.log("SaleForm fetchFormData - Fetched harvests:", harvests);
-      console.log("SaleForm fetchFormData - Fetched plantingLogs:", plantingLogs);
-      console.log("SaleForm fetchFormData - Fetched seedBatches:", seedBatches);
-      console.log("SaleForm fetchFormData - Fetched crops:", crops);
+      // console.log("SaleForm fetchFormData - Fetched customers:", customers);
+      // console.log("SaleForm fetchFormData - Fetched harvests:", harvests);
+      // console.log("SaleForm fetchFormData - Fetched plantingLogs:", plantingLogs);
+      // console.log("SaleForm fetchFormData - Fetched seedBatches:", seedBatches);
+      // console.log("SaleForm fetchFormData - Fetched crops:", crops);
+      // console.log("SaleForm fetchFormData - Fetched seedlingLogs:", seedlingLogs);
       setAvailableCustomers(customers);
       
+      const cropsMap = new Map(crops.map(c => [c.id, c])); // For efficient lookup
+
+      // console.log(`SaleForm: Fetched harvests count: ${harvests.length}`);
       const enrichedHarvests = harvests.map(h => {
+        // console.log(`SaleForm: Processing HL ID: ${h.id}, PL_ID: ${h.planting_log_id}`);
         const pLog = plantingLogs.find(pl => pl.id === h.planting_log_id);
-        let cropName = 'Unknown Crop';
-        if (pLog && pLog.seed_batch_id) {
-          const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
-          if (sBatch) {
-            const crop = crops.find(c => c.id === sBatch.crop_id);
-            cropName = crop?.name || 'Unknown Crop';
+        let cropName = 'Unknown Crop'; // Default
+        
+        if (pLog) {
+          // console.log(`SaleForm: For HL ${h.id}, PL found: ${pLog.id}, SB_ID: ${pLog.seed_batch_id}, SeedlingLogID: ${pLog.seedling_production_log_id}`);
+          if (pLog.seedling_production_log_id) { // Prioritize seedling log if present
+            const sLog = seedlingLogs.find(sl => sl.id === pLog.seedling_production_log_id);
+            if (sLog && sLog.crop_id) {
+              const crop = cropsMap.get(sLog.crop_id);
+              if (crop) {
+                // console.log(`SaleForm: For SeedlingLog ${sLog.id}, Crop found via direct crop_id: ${crop.name}`);
+                cropName = crop.name || 'Unnamed Crop';
+              } else {
+                // console.log(`SaleForm: For SeedlingLog ${sLog.id}, Crop NOT found (CropID: ${sLog.crop_id})`);
+              }
+            } else if (sLog) { // Seedling log found but no crop_id, try via its seed_batch_id
+                const sBatch = seedBatches.find(sb => sb.id === sLog.seed_batch_id);
+                if(sBatch && sBatch.crop_id) {
+                    const crop = cropsMap.get(sBatch.crop_id);
+                    if(crop) cropName = crop.name || 'Unnamed Crop';
+                }
+            }
+             else {
+              // console.log(`SaleForm: For PL ${pLog.id}, SeedlingLog NOT found (ID: ${pLog.seedling_production_log_id})`);
+            }
+          } else if (pLog.seed_batch_id) { // Fallback to direct seed batch if no seedling log
+            const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
+            if (sBatch && sBatch.crop_id) {
+              // console.log(`SaleForm: For PL ${pLog.id}, SB found: ${sBatch.id}, CropID: ${sBatch.crop_id}`);
+              const crop = cropsMap.get(sBatch.crop_id);
+              if (crop) {
+                // console.log(`SaleForm: For SB ${sBatch.id}, Crop found: ${crop.name}`);
+                cropName = crop.name || 'Unnamed Crop';
+              } else {
+                // console.log(`SaleForm: For SB ${sBatch.id}, Crop NOT found (CropID: ${sBatch.crop_id})`);
+              }
+            } else {
+              // console.log(`SaleForm: For PL ${pLog.id}, SB NOT found (SB_ID: ${pLog.seed_batch_id})`);
+            }
+          } else {
+            // console.log(`SaleForm: For PL ${pLog.id}, no seed_batch_id or seedling_production_log_id.`);
           }
-        } else if (pLog) {
-            // Fallback if no seed batch linked
+        } else {
+          // console.log(`SaleForm: For HL ${h.id}, PL NOT found (PL_ID: ${h.planting_log_id})`);
         }
         return { ...h, cropName, plantingDate: pLog?.planting_date };
       });
-      console.log("SaleForm fetchFormData - Enriched harvests:", enrichedHarvests);
       setAvailableHarvests(enrichedHarvests);
 
     } catch (error) {
@@ -81,6 +123,9 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
       setSaleDate(initialData.sale_date ? initialData.sale_date.split('T')[0] : new Date().toISOString().split('T')[0]);
       setCustomerId(initialData.customer_id || undefined);
       setNotes(initialData.notes || '');
+      setPaymentMethod(initialData.payment_method || 'on_account');
+      setPaymentStatus(initialData.payment_status || 'unpaid');
+      setAmountPaid(initialData.amount_paid === undefined || initialData.amount_paid === null ? '' : initialData.amount_paid);
       if (initialData.items) {
          const initialItems = initialData.items.map((item, index) => {
             // Ensure availableHarvests is populated before trying to find
@@ -102,17 +147,23 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
       }
     } else {
       setSaleDate(new Date().toISOString().split('T')[0]);
+      setPaymentMethod('on_account');
+      setPaymentStatus('unpaid');
+      setAmountPaid('');
       setItems([{ key: `item-0-${Date.now()}`, harvest_log_id: '', quantity_sold: 0, price_per_unit: 0, discount_type: null, discount_value: null, notes: '' }]);
     }
-  }, [initialData, fetchFormData]); // Removed availableHarvests to prevent loop
+  }, [initialData, fetchFormData]);
 
   const handleItemChange = (index: number, field: keyof SaleItem | 'quantity_sold_str' | 'price_per_unit_str' | 'discount_value_str', value: unknown) => {
     const newItemsState = [...items];
     const currentItem = { ...newItemsState[index] } as Partial<SaleItem & { key: string, availableQuantity?: number, cropName?: string }>;
 
     if (field === 'quantity_sold_str') {
+        // For quantity, allow integer or decimal, parseFloat is fine.
         currentItem.quantity_sold = value === '' ? undefined : parseFloat(value as string);
     } else if (field === 'price_per_unit_str') {
+        // For price, ensure it's parsed as a float.
+        // The input type="number" step="0.01" will help with user input.
         currentItem.price_per_unit = value === '' ? undefined : parseFloat(value as string);
     } else if (field === 'discount_value_str') {
         currentItem.discount_value = value === '' ? null : parseFloat(value as string);
@@ -233,6 +284,9 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
     const saleData = {
       sale_date: saleDate,
       customer_id: customerId || undefined,
+      payment_method: paymentMethod,
+      payment_status: paymentStatus,
+      amount_paid: amountPaid === '' ? undefined : Number(amountPaid),
       notes: notes.trim() || undefined,
     };
 
@@ -328,8 +382,55 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
               </div>
             </div>
           </div>
+          
+          {/* Payment Information Section */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t mt-4">
+            <div>
+              <label htmlFor="paymentMethod" className="block text-sm font-medium text-gray-700">Payment Method</label>
+              <select
+                id="paymentMethod"
+                value={paymentMethod}
+                onChange={(e) => setPaymentMethod(e.target.value as Sale['payment_method'])}
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                disabled={isSubmitting}
+              >
+                <option value="on_account">On Account</option>
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="paymentStatus" className="block text-sm font-medium text-gray-700">Payment Status</label>
+              <select
+                id="paymentStatus"
+                value={paymentStatus}
+                onChange={(e) => setPaymentStatus(e.target.value as Sale['payment_status'])}
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                disabled={isSubmitting}
+              >
+                <option value="unpaid">Unpaid</option>
+                <option value="partially_paid">Partially Paid</option>
+                <option value="paid">Paid</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="amountPaid" className="block text-sm font-medium text-gray-700">Amount Paid (€)</label>
+              <input
+                type="number"
+                step="0.01"
+                id="amountPaid"
+                value={amountPaid}
+                onChange={(e) => setAmountPaid(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                disabled={isSubmitting || paymentStatus === 'unpaid'}
+                placeholder="0.00"
+              />
+            </div>
+          </div>
 
-          <div className="space-y-3 pt-2 border-t mt-4">
+          <div className="space-y-3 pt-4 border-t mt-4">
             <h3 className="text-lg font-medium text-gray-900">Sale Items</h3>
             {items.map((item, index) => (
               <div key={item.key} className="p-3 border rounded-md space-y-2 bg-gray-50 relative">
@@ -379,9 +480,10 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
                   <div>
                     <label htmlFor={`itemPrice-${index}`} className="block text-xs font-medium text-gray-700">Price/Unit <span className="text-red-500">*</span></label>
                     <input
-                      type="text" 
+                      type="number" // Changed to number
+                      step="0.01"  // Allow decimals
                       id={`itemPrice-${index}`}
-                      value={item.price_per_unit === undefined ? '' : String(item.price_per_unit)}
+                      value={item.price_per_unit === undefined ? '' : item.price_per_unit} // Pass number or empty string
                       onChange={(e) => handleItemChange(index, 'price_per_unit_str', e.target.value)}
                       className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-xs"
                       required
@@ -439,9 +541,10 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
                             Discount Value ({item.discount_type === 'Percentage' ? '%' : '€'})
                         </label>
                         <input
-                            type="text"
+                            type="number" // Changed to number
+                            step={item.discount_type === 'Percentage' ? "0.01" : "0.01"} // Allow decimals for both
                             id={`itemDiscountValue-${index}`}
-                            value={item.discount_value === null || item.discount_value === undefined ? '' : String(item.discount_value)}
+                            value={item.discount_value === null || item.discount_value === undefined ? '' : item.discount_value} // Pass number or empty
                             onChange={(e) => handleItemChange(index, 'discount_value_str', e.target.value)}
                             className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-xs"
                             disabled={isSubmitting || !item.discount_type}
