@@ -61,16 +61,18 @@ async function getFullSaleDetails(saleId: string) {
         let productName = 'Unknown Product';
         let productDetails = '';
         if (item.harvest_log_id) {
-            const harvestLog = await db.harvestLogs.get(item.harvest_log_id); // Assuming is_deleted is handled or not relevant here
+            const harvestLog = await db.harvestLogs.get(item.harvest_log_id);
             if (harvestLog && harvestLog.is_deleted !== 1) {
                 productDetails = `(Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
                 const plantingLog = plantingLogsMap.get(harvestLog.planting_log_id);
                 
                 if (plantingLog) {
                     let crop: Crop | undefined;
+                    // ... (existing logic for harvested item name) ...
                     if (plantingLog.input_inventory_id) {
                         const invItem = inventoryItemsMap.get(plantingLog.input_inventory_id);
                         if (invItem && invItem.crop_id) crop = cropsMap.get(invItem.crop_id);
+                        else if (invItem) productName = invItem.name; // Use inv name if no crop
                     } else if (plantingLog.seedling_production_log_id) {
                         const seedlingLog = seedlingLogsMap.get(plantingLog.seedling_production_log_id);
                         if (seedlingLog) {
@@ -86,6 +88,13 @@ async function getFullSaleDetails(saleId: string) {
                     }
                     if (crop) productName = crop.name || 'Unnamed Crop';
                 }
+            }
+        } else if (item.input_inventory_id) {
+            // Fetch the InputInventory item to get its name
+            const inventoryItem = await db.inputInventory.get(item.input_inventory_id);
+            if (inventoryItem && inventoryItem.is_deleted !== 1) {
+                productName = inventoryItem.name;
+                productDetails = `(Stock ID: ${inventoryItem.id.substring(0,8)}...)`; // Or other relevant detail
             }
         }
         return { ...item, productName, productDetails };

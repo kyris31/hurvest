@@ -1,29 +1,26 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Sale, SaleItem, Customer, HarvestLog, InputInventory, db } from '@/lib/db'; // Added InputInventory
-import CustomerForm from './CustomerForm'; // To create new customers on the fly
+import { Sale, SaleItem, Customer, HarvestLog, InputInventory, db } from '@/lib/db';
+import CustomerForm from './CustomerForm';
 
 interface SaleFormProps {
   initialData?: Sale & { items?: SaleItem[] };
-  onSubmit: (saleData: Omit<Sale, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'total_amount'>, itemsData: Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'>[]) => Promise<void>;
+  onSubmit: (
+    saleData: Omit<Sale, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'total_amount' | 'payment_history'>, 
+    itemsData: (Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> & { sourceType?: 'harvest' | 'inventory' })[]
+  ) => Promise<void>;
   onCancel: () => void;
   isSubmitting: boolean;
 }
 
-interface EnrichedHarvestLog extends HarvestLog {
-  cropName?: string;
-  plantingDate?: string;
-}
-
-// Define a unified structure for sellable products
 interface SellableProduct {
-  id: string; // Can be harvest_log_id or input_inventory_id
+  id: string; 
   displayName: string;
   availableQuantity: number;
   quantityUnit: string;
-  sourceType: 'harvest' | 'inventory'; // To distinguish the origin
-  originalRecord: HarvestLog | InputInventory; // Keep original for reference if needed
+  sourceType: 'harvest' | 'inventory'; 
+  originalRecord: HarvestLog | InputInventory; 
 }
 
 export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting }: SaleFormProps) {
@@ -36,9 +33,9 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
 
   const [items, setItems] = useState<(Partial<SaleItem & {
     key: string;
-    productName?: string; // Display name of the selected product
-    availableQuantity?: number; // Available qty of the selected batch/harvest
-    selectedProductId?: string; // Unified ID for the dropdown
+    productName?: string; 
+    availableQuantity?: number; 
+    selectedProductId?: string; 
     sourceType?: 'harvest' | 'inventory';
   }>)[]>([]);
   
@@ -52,24 +49,23 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
     try {
       const [customers, harvests, plantingLogs, seedBatches, crops, seedlingLogs, allInputInventory] = await Promise.all([
         db.customers.orderBy('name').filter(c => c.is_deleted !==1).toArray(),
-        db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted !== 1 && h.quantity_harvested > 0).reverse().toArray(),
+        db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted !== 1 && (h.current_quantity_available ?? h.quantity_harvested) > 0).reverse().toArray(),
         db.plantingLogs.filter(p => p.is_deleted !== 1).toArray(),
         db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
         db.crops.filter(c => c.is_deleted !== 1).toArray(),
         db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(),
-        db.inputInventory.filter(ii => ii.is_deleted !== 1 && (ii.current_quantity ?? 0) > 0).toArray(), // Fetch all relevant inventory
+        db.inputInventory.filter(ii => ii.is_deleted !== 1 && (ii.current_quantity ?? 0) > 0).toArray(),
       ]);
       setAvailableCustomers(customers);
       
       const cropsMap = new Map(crops.map(c => [c.id, c]));
       const products: SellableProduct[] = [];
 
-      // Process Harvest Logs
       harvests.forEach(h => {
         const pLog = plantingLogs.find(pl => pl.id === h.planting_log_id);
         let cropName = 'Unknown Harvested Crop';
         if (pLog) {
-          if (pLog.input_inventory_id) { // Seeds/seedlings from inventory
+          if (pLog.input_inventory_id) { 
             const invItem = allInputInventory.find(ii => ii.id === pLog.input_inventory_id);
             if (invItem && invItem.crop_id) cropName = cropsMap.get(invItem.crop_id)?.name || invItem.name || cropName;
             else if (invItem) cropName = invItem.name || cropName;
@@ -84,7 +80,6 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
         products.push({
           id: h.id,
           displayName: `${cropName} (Harvested: ${new Date(h.harvest_date).toLocaleDateString()})`,
-          // Use current_quantity_available if it exists, otherwise fallback to quantity_harvested
           availableQuantity: h.current_quantity_available !== undefined ? h.current_quantity_available : h.quantity_harvested,
           quantityUnit: h.quantity_unit,
           sourceType: 'harvest',
@@ -92,23 +87,36 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
         });
       });
 
-      // Process Input Inventory (Purchased Goods, etc.)
+      const inventoryGroups: Record<string, { displayName: string, totalAvailable: number, unit: string, originalRecords: InputInventory[] }> = {};
       allInputInventory.forEach(ii => {
-        // Assuming 'Purchased Goods' or similar type are directly sellable
-        // Add more sophisticated filtering if needed (e.g., a sellable flag on InputInventory)
-        if (ii.type === 'Purchased Goods' || ii.type === 'Fertilizer' || ii.type === 'Pesticide' || ii.type === 'Other Input') { // Example: make more types sellable
+        if (ii.type === 'Purchased Goods' && (ii.current_quantity || 0) > 0) {
+          const groupKey = `${ii.name}::${ii.quantity_unit || 'unit'}`;
+          if (!inventoryGroups[groupKey]) {
+            inventoryGroups[groupKey] = {
+              displayName: `${ii.name} (Stock - Resale)`,
+              totalAvailable: 0,
+              unit: ii.quantity_unit || 'unit',
+              originalRecords: []
+            };
+          }
+          inventoryGroups[groupKey].totalAvailable += (ii.current_quantity || 0);
+          inventoryGroups[groupKey].originalRecords.push(ii);
+        }
+      });
+
+      Object.values(inventoryGroups).forEach(group => {
+        if (group.originalRecords.length > 0) {
           products.push({
-            id: ii.id,
-            displayName: `${ii.name} (Stock)`,
-            availableQuantity: ii.current_quantity || 0,
-            quantityUnit: ii.quantity_unit || 'unit',
-            sourceType: 'inventory',
-            originalRecord: ii,
+            id: group.originalRecords[0].id, 
+            displayName: group.displayName,
+            availableQuantity: group.totalAvailable,
+            quantityUnit: group.unit,
+            sourceType: 'inventory', 
+            originalRecord: group.originalRecords[0], 
           });
         }
       });
       setSellableProducts(products.sort((a,b) => a.displayName.localeCompare(b.displayName)));
-
     } catch (error) {
       console.error("Failed to fetch form data for sales", error);
       setFormError("Could not load customer or product data.");
@@ -116,11 +124,11 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
   }, []);
 
   useEffect(() => {
-    fetchFormData(); // Call it once when component mounts or initialData changes
-  }, [fetchFormData]); // fetchFormData is stable due to useCallback
+    fetchFormData();
+  }, [fetchFormData]); 
 
 
-  useEffect(() => { // Separate useEffect for initializing form based on initialData and fetched products
+  useEffect(() => { 
     if (initialData) {
       setSaleDate(initialData.sale_date ? initialData.sale_date.split('T')[0] : new Date().toISOString().split('T')[0]);
       setCustomerId(initialData.customer_id || undefined);
@@ -129,11 +137,14 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
       setPaymentStatus(initialData.payment_status || 'unpaid');
       setAmountPaid(initialData.amount_paid === undefined || initialData.amount_paid === null ? '' : initialData.amount_paid);
       
-      if (initialData.items && sellableProducts.length > 0) { // Ensure sellableProducts is populated
+      if (initialData.items && sellableProducts.length > 0) { 
          const initialItems = initialData.items.map((item, index) => {
             const product = sellableProducts.find(p =>
                 (item.harvest_log_id && p.sourceType === 'harvest' && p.id === item.harvest_log_id) ||
-                (item.input_inventory_id && p.sourceType === 'inventory' && p.id === item.input_inventory_id)
+                (item.input_inventory_id && p.sourceType === 'inventory' && p.id === item.input_inventory_id) 
+                // For edited consolidated items, p.id is the representative batch ID.
+                // This might need adjustment if an edit needs to reflect multiple original batches.
+                // For now, it links to the representative.
             );
             return {
                 ...item,
@@ -149,17 +160,17 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
             };
         });
         setItems(initialItems);
-      } else if (!initialData.items) { // If new sale, or initialData has no items
+      } else if (!initialData.items) { 
         setItems([{ key: `item-0-${Date.now()}`, quantity_sold: 0, price_per_unit: 0, discount_type: null, discount_value: null, notes: '' }]);
       }
-    } else { // New Sale
+    } else { 
       setSaleDate(new Date().toISOString().split('T')[0]);
       setPaymentMethod('on_account');
       setPaymentStatus('unpaid');
       setAmountPaid('');
       setItems([{ key: `item-0-${Date.now()}`, quantity_sold: 0, price_per_unit: 0, discount_type: null, discount_value: null, notes: '' }]);
     }
-  }, [initialData, sellableProducts]); // Re-run when initialData or sellableProducts changes
+  }, [initialData, sellableProducts]); 
 
 
   const handleItemChange = (index: number, field: keyof SaleItem | 'quantity_sold_str' | 'price_per_unit_str' | 'discount_value_str' | 'selectedProductId', value: unknown) => {
@@ -167,18 +178,20 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
     const currentItem = { ...newItemsState[index] } as Partial<SaleItem & { key: string, availableQuantity?: number, productName?: string, selectedProductId?: string, sourceType?: 'harvest' | 'inventory' }>;
 
     if (field === 'selectedProductId') {
-        const selectedProduct = sellableProducts.find(p => p.id === (value as string));
+        const selectedProduct = sellableProducts.find(p => p.id === (value as string)); 
         if (selectedProduct) {
-            currentItem.selectedProductId = selectedProduct.id;
+            currentItem.selectedProductId = selectedProduct.id; 
             currentItem.productName = selectedProduct.displayName;
             currentItem.availableQuantity = selectedProduct.availableQuantity;
             currentItem.sourceType = selectedProduct.sourceType;
+            
+            currentItem.harvest_log_id = undefined;
+            currentItem.input_inventory_id = undefined;
+
             if (selectedProduct.sourceType === 'harvest') {
-                currentItem.harvest_log_id = selectedProduct.id;
-                currentItem.input_inventory_id = undefined;
+                currentItem.harvest_log_id = selectedProduct.id; 
             } else if (selectedProduct.sourceType === 'inventory') {
-                currentItem.input_inventory_id = selectedProduct.id;
-                currentItem.harvest_log_id = undefined;
+                currentItem.input_inventory_id = selectedProduct.id; 
             }
         } else {
             currentItem.selectedProductId = undefined;
@@ -204,7 +217,6 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
     } else if (field === 'price_per_unit' && typeof value === 'number') {
         currentItem.price_per_unit = value;
     }
-    // Other direct SaleItem fields are not typically set this way in this form after product selection
     
     newItemsState[index] = currentItem;
     setItems(newItemsState);
@@ -213,7 +225,6 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
   const addItem = () => {
     setItems([...items, {
         key: `item-${items.length}-${Date.now()}`,
-        // harvest_log_id and input_inventory_id will be set upon product selection
         quantity_sold: 0,
         price_per_unit: 0,
         discount_type: null,
@@ -244,7 +255,7 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
       await fetchFormData(); 
       setCustomerId(id); 
       setShowCustomerForm(false);
-      return id;
+      // return id; // Not used, can be removed if not needed by caller
     } catch (err) {
       console.error("Failed to add customer:", err);
       setFormError("Failed to add new customer.");
@@ -263,13 +274,12 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
       return;
     }
 
-    const saleItemsData: Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'>[] = [];
+    const saleItemsData: (Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> & { sourceType?: 'harvest' | 'inventory' })[] = [];
     for (const [index, item] of items.entries()) {
       if (!item.selectedProductId || item.quantity_sold === undefined || item.price_per_unit === undefined || Number(item.quantity_sold) <= 0 || Number(item.price_per_unit) < 0) {
         setFormError(`Item ${index + 1}: Product, valid Quantity (>0), and Price (>=0) are required.`);
         return;
       }
-      // Validate quantity against available stock
       if (item.availableQuantity !== undefined && Number(item.quantity_sold) > item.availableQuantity) {
         setFormError(`Item ${index + 1} (${item.productName || 'Selected Product'}): Quantity sold (${Number(item.quantity_sold)}) exceeds available stock (${item.availableQuantity}).`);
         return;
@@ -278,7 +288,6 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
         setFormError(`Item ${index + 1}: Quantity and Price must be numbers.`);
         return;
       }
-      // Validate discount value based on type
       if (item.discount_type) {
         if (item.discount_value === undefined || item.discount_value === null || isNaN(Number(item.discount_value)) || Number(item.discount_value) < 0) {
           setFormError(`Item ${index + 1}: Discount Value must be a non-negative number if Discount Type is selected.`);
@@ -293,20 +302,23 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
          return;
       }
 
-      const saleItemEntry: Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> = {
+      const saleItemEntry: Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> & { sourceType?: 'harvest' | 'inventory' } = {
         quantity_sold: Number(item.quantity_sold),
         price_per_unit: Number(item.price_per_unit),
         discount_type: item.discount_type || null,
         discount_value: (item.discount_type && item.discount_value !== null && item.discount_value !== undefined) ? Number(item.discount_value) : null,
         notes: item.notes,
+        sourceType: item.sourceType, 
+        harvest_log_id: undefined,
+        input_inventory_id: undefined,
       };
 
       if (item.sourceType === 'harvest' && item.harvest_log_id) {
         saleItemEntry.harvest_log_id = item.harvest_log_id;
       } else if (item.sourceType === 'inventory' && item.input_inventory_id) {
-        saleItemEntry.input_inventory_id = item.input_inventory_id;
+        saleItemEntry.input_inventory_id = item.input_inventory_id; 
       } else {
-        setFormError(`Item ${index + 1}: Product source is unclear or ID is missing.`);
+        setFormError(`Item ${index + 1}: Product source type or specific ID (harvest/inventory) is missing.`);
         return;
       }
       saleItemsData.push(saleItemEntry);
@@ -338,7 +350,7 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
             itemTotal -= itemTotal * (discountValue / 100);
         }
     }
-    return Math.max(0, itemTotal); // Ensure total doesn't go below zero
+    return Math.max(0, itemTotal); 
   };
 
   const calculateOverallTotal = () => {
@@ -414,7 +426,6 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
             </div>
           </div>
           
-          {/* Payment Information Section */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t mt-4">
             <div>
               <label htmlFor="paymentMethod" className="block text-sm font-medium text-gray-700">Payment Method</label>
@@ -475,170 +486,143 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
                     </button>
                 )}
-                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                  <div className="md:col-span-2">
-                    <label htmlFor={`itemProduct-${index}`} className="block text-xs font-medium text-gray-700">Product <span className="text-red-500">*</span></label>
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                  <div className="md:col-span-4">
+                    <label htmlFor={`product-${index}`} className="block text-xs font-medium text-gray-700">Product <span className="text-red-500">*</span></label>
                     <select
-                      id={`itemProduct-${index}`}
+                      id={`product-${index}`}
                       value={item.selectedProductId || ''}
                       onChange={(e) => handleItemChange(index, 'selectedProductId', e.target.value)}
-                      className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-xs"
+                      className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm text-xs"
                       required
                       disabled={isSubmitting}
                     >
                       <option value="">Select Product</option>
                       {sellableProducts.map(p => (
-                        <option key={`${p.sourceType}-${p.id}`} value={p.id}>
-                          {p.displayName} (Avail: {p.availableQuantity} {p.quantityUnit})
+                        <option key={p.id} value={p.id}>
+                          {`${p.displayName} (Avail: ${p.availableQuantity} ${p.quantityUnit})`}
                         </option>
                       ))}
                     </select>
-                    {item.selectedProductId && item.availableQuantity !== undefined && <p className="text-xs text-gray-500 mt-0.5">Selected: {item.productName} | Available: {item.availableQuantity}</p>}
                   </div>
-                  <div>
-                    <label htmlFor={`itemQty-${index}`} className="block text-xs font-medium text-gray-700">Quantity Sold <span className="text-red-500">*</span></label>
+                  <div className="md:col-span-2">
+                    <label htmlFor={`quantity-${index}`} className="block text-xs font-medium text-gray-700">Quantity <span className="text-red-500">*</span></label>
                     <input
-                      type="text" 
-                      id={`itemQty-${index}`}
-                      value={item.quantity_sold === undefined ? '' : String(item.quantity_sold)}
+                      type="number"
+                      id={`quantity-${index}`}
+                      value={item.quantity_sold === undefined ? '' : item.quantity_sold}
                       onChange={(e) => handleItemChange(index, 'quantity_sold_str', e.target.value)}
-                      className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-xs"
+                      className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm text-xs"
                       required
                       disabled={isSubmitting}
-                      placeholder="0"
+                      step="any"
+                      min="0.001" // Ensure positive quantity
                     />
                   </div>
-                  <div>
-                    <label htmlFor={`itemPrice-${index}`} className="block text-xs font-medium text-gray-700">Price/Unit <span className="text-red-500">*</span></label>
+                  <div className="md:col-span-2">
+                    <label htmlFor={`price-${index}`} className="block text-xs font-medium text-gray-700">Price/Unit <span className="text-red-500">*</span></label>
                     <input
-                      type="number" // Changed to number
-                      step="0.01"  // Allow decimals
-                      id={`itemPrice-${index}`}
-                      value={item.price_per_unit === undefined ? '' : item.price_per_unit} // Pass number or empty string
+                      type="number"
+                      id={`price-${index}`}
+                      value={item.price_per_unit === undefined ? '' : item.price_per_unit}
                       onChange={(e) => handleItemChange(index, 'price_per_unit_str', e.target.value)}
-                      className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-xs"
+                      className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm text-xs"
                       required
                       disabled={isSubmitting}
-                      placeholder="0.00"
+                      step="0.01"
+                      min="0"
                     />
                   </div>
-                  {/* Discount fields will go here, making the grid more complex or needing a new row */}
-                </div>
-                {/* New row for discount and item notes */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-2">
-                    <div>
-                        <label className="block text-xs font-medium text-gray-700">Discount Type</label>
-                        <div className="mt-1 flex space-x-4">
-                            <label className="inline-flex items-center">
-                                <input
-                                    type="radio"
-                                    name={`discountType-${item.key}`}
-                                    value="Amount"
-                                    checked={item.discount_type === 'Amount'}
-                                    onChange={(e) => handleItemChange(index, 'discount_type', e.target.value)}
-                                    className="form-radio h-4 w-4 text-green-600"
-                                    disabled={isSubmitting}
-                                />
-                                <span className="ml-2 text-xs text-gray-700">€ Amount</span>
-                            </label>
-                            <label className="inline-flex items-center">
-                                <input
-                                    type="radio"
-                                    name={`discountType-${item.key}`}
-                                    value="Percentage"
-                                    checked={item.discount_type === 'Percentage'}
-                                    onChange={(e) => handleItemChange(index, 'discount_type', e.target.value)}
-                                    className="form-radio h-4 w-4 text-green-600"
-                                    disabled={isSubmitting}
-                                />
-                                <span className="ml-2 text-xs text-gray-700">% Percentage</span>
-                            </label>
-                             <label className="inline-flex items-center">
-                                <input
-                                    type="radio"
-                                    name={`discountType-${item.key}`}
-                                    value="" // Represents null or no discount
-                                    checked={!item.discount_type}
-                                    onChange={() => handleItemChange(index, 'discount_type', '')}
-                                    className="form-radio h-4 w-4 text-gray-400"
-                                    disabled={isSubmitting}
-                                />
-                                <span className="ml-2 text-xs text-gray-500">None</span>
-                            </label>
+                  <div className="md:col-span-2">
+                     <label htmlFor={`discountType-${index}`} className="block text-xs font-medium text-gray-700">Discount</label>
+                        <div className="mt-1 flex space-x-1">
+                            <select 
+                                id={`discountType-${index}`}
+                                value={item.discount_type || ''}
+                                onChange={(e) => handleItemChange(index, 'discount_type', e.target.value || null)}
+                                className="block w-1/2 px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm text-xs"
+                                disabled={isSubmitting}
+                            >
+                                <option value="">Type</option>
+                                <option value="Amount">Amount (€)</option>
+                                <option value="Percentage">Percentage (%)</option>
+                            </select>
+                            <input
+                                type="number"
+                                id={`discountValue-${index}`}
+                                value={item.discount_value === null || item.discount_value === undefined ? '' : item.discount_value}
+                                onChange={(e) => handleItemChange(index, 'discount_value_str', e.target.value)}
+                                className="block w-1/2 px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm text-xs"
+                                disabled={isSubmitting || !item.discount_type}
+                                step="any"
+                                min="0"
+                                placeholder="Value"
+                            />
                         </div>
-                    </div>
-                    <div className="md:col-span-1">
-                        <label htmlFor={`itemDiscountValue-${index}`} className="block text-xs font-medium text-gray-700">
-                            Discount Value ({item.discount_type === 'Percentage' ? '%' : '€'})
-                        </label>
-                        <input
-                            type="number" // Changed to number
-                            step={item.discount_type === 'Percentage' ? "0.01" : "0.01"} // Allow decimals for both
-                            id={`itemDiscountValue-${index}`}
-                            value={item.discount_value === null || item.discount_value === undefined ? '' : item.discount_value} // Pass number or empty
-                            onChange={(e) => handleItemChange(index, 'discount_value_str', e.target.value)}
-                            className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-xs"
-                            disabled={isSubmitting || !item.discount_type}
-                            placeholder="0"
-                        />
-                    </div>
-                     <div className="md:col-span-1">
-                        <label htmlFor={`itemNotes-${index}`} className="block text-xs font-medium text-gray-700">Item Notes</label>
-                        <input
-                            type="text"
-                            id={`itemNotes-${index}`}
-                            value={item.notes || ''}
-                            onChange={(e) => handleItemChange(index, 'notes', e.target.value)}
-                            className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-xs"
-                            disabled={isSubmitting}
-                        />
-                    </div>
+                  </div>
+                  <div className="md:col-span-2 flex items-end">
+                    <p className="text-xs text-gray-800 w-full text-right pr-1">
+                        Subtotal: €{calculateItemTotal(item).toFixed(2)}
+                    </p>
+                  </div>
                 </div>
-                 <p className="text-xs text-right font-medium text-gray-700 mt-1">Item Subtotal: €{calculateItemTotal(item).toFixed(2)}</p>
+                 <div className="mt-1">
+                    <label htmlFor={`itemNotes-${index}`} className="block text-xs font-medium text-gray-700">Item Notes</label>
+                    <input
+                        type="text"
+                        id={`itemNotes-${index}`}
+                        value={item.notes || ''}
+                        onChange={(e) => handleItemChange(index, 'notes', e.target.value)}
+                        className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm text-xs"
+                        disabled={isSubmitting}
+                        placeholder="Optional notes for this item"
+                    />
+                </div>
               </div>
             ))}
             <button
               type="button"
               onClick={addItem}
-              className="mt-2 px-3 py-1.5 border border-dashed border-green-400 text-sm font-medium rounded-md text-green-700 hover:bg-green-50 focus:outline-none"
+              className="mt-2 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-md border border-green-300"
               disabled={isSubmitting}
             >
               + Add Item
             </button>
           </div>
-          
+
           <div className="pt-4 border-t">
-            <label htmlFor="saleNotes" className="block text-sm font-medium text-gray-700">Overall Sale Notes</label>
+            <label htmlFor="overallSaleNotes" className="block text-sm font-medium text-gray-700">Overall Sale Notes</label>
             <textarea
-              id="saleNotes"
+              id="overallSaleNotes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
               disabled={isSubmitting}
+              placeholder="Any overall notes for this sale..."
             />
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t">
-            <h3 className="text-xl font-semibold text-gray-800">
-                Overall Total: €{calculateOverallTotal().toFixed(2)}
+          <div className="flex items-center justify-between pt-5 border-t">
+            <h3 className="text-xl font-semibold text-gray-900">
+              Overall Total: €{calculateOverallTotal().toFixed(2)}
             </h3>
-            <div className="flex items-center space-x-3">
-                <button
+            <div className="flex items-center justify-end space-x-3">
+              <button
                 type="button"
                 onClick={onCancel}
                 disabled={isSubmitting}
                 className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md border border-gray-300 disabled:opacity-50"
-                >
+              >
                 Cancel
-                </button>
-                <button
+              </button>
+              <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || items.length === 0 || items.some(i => !i.selectedProductId || Number(i.quantity_sold) <= 0)}
                 className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
-                >
-                {isSubmitting ? (initialData ? 'Saving...' : 'Recording Sale...') : (initialData ? 'Save Changes' : 'Record Sale')}
-                </button>
+              >
+                {isSubmitting ? (initialData ? 'Saving...' : 'Recording...') : (initialData ? 'Save Changes' : 'Record Sale')}
+              </button>
             </div>
           </div>
         </form>

@@ -145,7 +145,7 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center p-4">
-      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg">
+      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg overflow-y-auto max-h-[90vh]">
         <h2 className="text-2xl font-bold mb-6 text-gray-800">
           {initialData ? 'Edit Inventory Item' : 'Add New Inventory Item'}
         </h2>

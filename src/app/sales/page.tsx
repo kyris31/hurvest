@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { db, Sale, SaleItem, Customer, Invoice } from '@/lib/db'; 
+import { db, Sale, SaleItem, Customer, Invoice, InputInventory, HarvestLog } from '@/lib/db'; // Added InputInventory, HarvestLog
 import SaleList from '@/components/SaleList';
 import SaleForm from '@/components/SaleForm';
 import RecordPaymentModal from '@/components/RecordPaymentModal';
@@ -33,7 +33,7 @@ export default function SalesPage() {
         customersData,
       ] = await Promise.all([
         db.sales.orderBy('sale_date').filter(s => s.is_deleted === 0).reverse().toArray(),
-        db.saleItems.where('is_deleted').equals(0).toArray(),
+        db.saleItems.where('is_deleted').equals(0).toArray(), // Fetch all for calculations in SaleList
         db.customers.orderBy('name').filter(c => c.is_deleted === 0).toArray(),
       ]);
       setSales(salesData);
@@ -54,7 +54,7 @@ export default function SalesPage() {
 
   const handleFormSubmit = async (
     saleDataFromForm: Omit<Sale, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'total_amount' | 'payment_history'>, 
-    itemsData: Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'>[]
+    itemsData: (Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> & { sourceType?: 'harvest' | 'inventory' })[]
   ) => {
     setIsSubmitting(true);
     setError(null);
@@ -94,7 +94,7 @@ export default function SalesPage() {
                   _last_modified: Date.now(),
                   _synced: 0,
                 });
-                console.log(`[SaleEdit] Reverted InputInventory for ${invItem.name} by ${oldItem.quantity_sold}.`);
+                console.log(`[SaleEdit] Reverted InputInventory for ${invItem.name} (batch ${invItem.id}) by ${oldItem.quantity_sold}.`);
               }
             } else if (oldItem.harvest_log_id && oldItem.quantity_sold > 0) {
               const harvestItem = await db.harvestLogs.get(oldItem.harvest_log_id);
@@ -143,72 +143,114 @@ export default function SalesPage() {
             await db.sales.add(newSale);
           }
 
-        for (const item of itemsData) {
-            const newItemId = crypto.randomUUID();
-            const saleItemToAdd: SaleItem = {
-              id: newItemId,
-              sale_id: saleId,
-              harvest_log_id: item.harvest_log_id, 
-              input_inventory_id: item.input_inventory_id, 
-              quantity_sold: Number(item.quantity_sold),
-              price_per_unit: Number(item.price_per_unit),
-              discount_type: item.discount_type || null,
-              discount_value: (item.discount_type && item.discount_value !== null && item.discount_value !== undefined) ? Number(item.discount_value) : null,
-              notes: item.notes,
-              created_at: now,
-              updated_at: now,
-              _synced: 0,
-              _last_modified: currentTimestamp,
-              is_deleted: 0,
-              deleted_at: undefined,
-            };
-            await db.saleItems.add(saleItemToAdd);
+        const finalSaleItemsForDb: SaleItem[] = [];
 
-            if (item.input_inventory_id && Number(item.quantity_sold) > 0) {
-              const invItem = await db.inputInventory.get(item.input_inventory_id);
-              if (invItem) {
-                await db.inputInventory.update(item.input_inventory_id, {
-                  current_quantity: (invItem.current_quantity || 0) - Number(item.quantity_sold),
+        for (const formItem of itemsData) {
+          let quantityToFulfill = Number(formItem.quantity_sold);
+          if (isNaN(quantityToFulfill) || quantityToFulfill <= 0) continue; 
+
+          const originalFormItemPricePerUnit = Number(formItem.price_per_unit);
+          const commonSaleItemData = { 
+            sale_id: saleId,
+            price_per_unit: originalFormItemPricePerUnit,
+            discount_type: formItem.discount_type || null,
+            discount_value: (formItem.discount_type && formItem.discount_value !== null && formItem.discount_value !== undefined) ? Number(formItem.discount_value) : null,
+            notes: formItem.notes,
+            created_at: now,
+            updated_at: now,
+            _synced: 0,
+            _last_modified: currentTimestamp,
+            is_deleted: 0,
+            deleted_at: undefined,
+          };
+
+          if (formItem.sourceType === 'inventory' && formItem.input_inventory_id) {
+            const representativeBatch = await db.inputInventory.get(formItem.input_inventory_id);
+            if (!representativeBatch) {
+              console.warn(`[SaleSubmit] Representative InputInventory batch ID ${formItem.input_inventory_id} not found for form item. Skipping this item.`);
+              continue; 
+            }
+
+            const availableBatches = await db.inputInventory
+              .where({ name: representativeBatch.name, quantity_unit: representativeBatch.quantity_unit, type: 'Purchased Goods' })
+              .filter(batch => (batch.current_quantity || 0) > 0 && batch.is_deleted !== 1)
+              .sortBy('purchase_date'); 
+
+            for (const batch of availableBatches) {
+              if (quantityToFulfill <= 0) break;
+              const quantityFromThisBatch = Math.min(quantityToFulfill, batch.current_quantity || 0);
+
+              if (quantityFromThisBatch > 0) {
+                finalSaleItemsForDb.push({
+                  ...commonSaleItemData,
+                  id: crypto.randomUUID(),
+                  input_inventory_id: batch.id, 
+                  harvest_log_id: undefined,
+                  quantity_sold: quantityFromThisBatch,
+                });
+                await db.inputInventory.update(batch.id, {
+                  current_quantity: (batch.current_quantity || 0) - quantityFromThisBatch,
                   _last_modified: Date.now(),
                   _synced: 0,
                 });
-                console.log(`[SaleSubmit] Decremented InputInventory for ${invItem.name} by ${item.quantity_sold}.`);
-              } else {
-                console.warn(`[SaleSubmit] Could not find InputInventory item with ID ${item.input_inventory_id} to decrement quantity.`);
-              }
-            } else if (item.harvest_log_id && Number(item.quantity_sold) > 0) {
-              const harvestItem = await db.harvestLogs.get(item.harvest_log_id);
-              if (harvestItem) {
-                await db.harvestLogs.update(item.harvest_log_id, {
-                  current_quantity_available: (harvestItem.current_quantity_available || 0) - Number(item.quantity_sold),
-                  _last_modified: Date.now(),
-                  _synced: 0,
-                });
-                console.log(`[SaleSubmit] Decremented HarvestLog ${harvestItem.id} by ${item.quantity_sold}.`);
-              } else {
-                console.warn(`[SaleSubmit] Could not find HarvestLog item with ID ${item.harvest_log_id} to decrement quantity.`);
+                console.log(`[SaleSubmit] Decremented InputInventory batch ${batch.name} (ID: ${batch.id}) by ${quantityFromThisBatch}.`);
+                quantityToFulfill -= quantityFromThisBatch;
               }
             }
-          }
-          
-          const invoiceNumber = `INV-${new Date().getFullYear()}-${String(currentTimestamp).slice(-6)}`;
-          const newInvoice: Invoice = {
+            if (quantityToFulfill > 0) {
+              console.warn(`[SaleSubmit] Could not fulfill entire quantity for ${representativeBatch.name}. Remaining: ${quantityToFulfill}. This indicates insufficient stock across all batches.`);
+            }
+          } else if (formItem.sourceType === 'harvest' && formItem.harvest_log_id) {
+            finalSaleItemsForDb.push({
+              ...commonSaleItemData,
               id: crypto.randomUUID(),
-              sale_id: saleId,
-              invoice_number: invoiceNumber,
-              invoice_date: saleDataFromForm.sale_date,
-              status: 'Draft',
-              pdf_url: `placeholder_invoice_${saleId}.pdf`,
-              created_at: now,
-              updated_at: now,
-              _synced: 0,
-              _last_modified: currentTimestamp,
-              is_deleted: 0,
-              deleted_at: undefined,
-          };
-          await db.invoices.add(newInvoice);
-        console.log(`Invoice ${invoiceNumber} created locally for sale ${saleId}`);
-      }); 
+              harvest_log_id: formItem.harvest_log_id,
+              input_inventory_id: undefined,
+              quantity_sold: quantityToFulfill, 
+            });
+            const harvestItem = await db.harvestLogs.get(formItem.harvest_log_id);
+            if (harvestItem) {
+              await db.harvestLogs.update(formItem.harvest_log_id, {
+                current_quantity_available: (harvestItem.current_quantity_available || 0) - quantityToFulfill,
+                _last_modified: Date.now(),
+                _synced: 0,
+              });
+              console.log(`[SaleSubmit] Decremented HarvestLog ${harvestItem.id} by ${quantityToFulfill}.`);
+            } else {
+              console.warn(`[SaleSubmit] Could not find HarvestLog item with ID ${formItem.harvest_log_id} to decrement quantity.`);
+            }
+          } else {
+             console.warn(`[SaleSubmit] Form item has no valid inventory or harvest link, or missing sourceType:`, JSON.stringify(formItem));
+          }
+        }
+        
+        if (finalSaleItemsForDb.length > 0) {
+            console.log(`[SaleSubmit] Attempting to bulkAdd ${finalSaleItemsForDb.length} processed SaleItem records to Dexie for Sale ID ${saleId}.`);
+            await db.saleItems.bulkAdd(finalSaleItemsForDb);
+            console.log(`[SaleSubmit] Successfully bulkAdded ${finalSaleItemsForDb.length} SaleItem records.`);
+        } else if (itemsData.some(item => Number(item.quantity_sold) > 0)) {
+            console.warn("[SaleSubmit] No valid sale items were processed to be saved to the database, despite form items having quantity > 0 for Sale ID ${saleId}.");
+        }
+          
+        const invoiceNumber = `INV-${new Date().getFullYear()}-${String(currentTimestamp).slice(-6)}`;
+        const newInvoice: Invoice = {
+            id: crypto.randomUUID(),
+            sale_id: saleId,
+            invoice_number: invoiceNumber,
+            invoice_date: saleDataFromForm.sale_date,
+            status: 'Draft',
+            pdf_url: `placeholder_invoice_${saleId}.pdf`, 
+            created_at: now,
+            updated_at: now,
+            _synced: 0,
+            _last_modified: currentTimestamp,
+            is_deleted: 0,
+            deleted_at: undefined,
+        };
+        await db.invoices.add(newInvoice);
+        console.log(`[SaleSubmit] Invoice ${invoiceNumber} created locally for Sale ID ${saleId}. Transaction committing...`);
+      });
+      console.log(`[SaleSubmit] Dexie transaction completed for Sale ID ${saleId}.`);
       
       downloadInvoicePDF(saleId).catch(pdfError => {
         console.error("Error auto-downloading invoice after sale:", pdfError);
@@ -222,7 +264,7 @@ export default function SalesPage() {
         console.error("SalesPage: Immediate push failed.", pushResult.errors);
       }
 
-      await fetchData();
+      await fetchData(); 
       setShowForm(false);
       setEditingSale(null);
     } catch (err: unknown) {
@@ -367,6 +409,12 @@ export default function SalesPage() {
       setIsRecordingPayment(false);
     }
   };
+
+  console.log('[SalesPage Render] isLoading:', isLoading);
+  console.log('[SalesPage Render] error:', error);
+  console.log('[SalesPage Render] sales?.length:', sales?.length);
+  console.log('[SalesPage Render] customers?.length:', customers?.length);
+  console.log('[SalesPage Render] saleItems?.length:', saleItems?.length);
 
   return (
     <div>
