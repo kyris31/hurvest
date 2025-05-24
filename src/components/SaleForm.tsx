@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Sale, SaleItem, Customer, HarvestLog, db } from '@/lib/db'; // Removed unused PlantingLog, Crop, SeedBatch
+import { Sale, SaleItem, Customer, HarvestLog, InputInventory, db } from '@/lib/db'; // Added InputInventory
 import CustomerForm from './CustomerForm'; // To create new customers on the fly
 
 interface SaleFormProps {
@@ -16,6 +16,16 @@ interface EnrichedHarvestLog extends HarvestLog {
   plantingDate?: string;
 }
 
+// Define a unified structure for sellable products
+interface SellableProduct {
+  id: string; // Can be harvest_log_id or input_inventory_id
+  displayName: string;
+  availableQuantity: number;
+  quantityUnit: string;
+  sourceType: 'harvest' | 'inventory'; // To distinguish the origin
+  originalRecord: HarvestLog | InputInventory; // Keep original for reference if needed
+}
+
 export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting }: SaleFormProps) {
   const [saleDate, setSaleDate] = useState('');
   const [customerId, setCustomerId] = useState<string | undefined>(undefined);
@@ -25,88 +35,92 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
   const [amountPaid, setAmountPaid] = useState<number | ''>('');
 
   const [items, setItems] = useState<(Partial<SaleItem & {
-    key: string,
-    availableQuantity?: number,
-    cropName?: string,
-    // Form-specific discount fields, SaleItem interface already has discount_type and discount_value
-    // We can use them directly if SaleItem is properly typed in the state.
-    // Let's ensure the SaleItem type itself is used for these.
+    key: string;
+    productName?: string; // Display name of the selected product
+    availableQuantity?: number; // Available qty of the selected batch/harvest
+    selectedProductId?: string; // Unified ID for the dropdown
+    sourceType?: 'harvest' | 'inventory';
   }>)[]>([]);
   
   const [availableCustomers, setAvailableCustomers] = useState<Customer[]>([]);
-  const [availableHarvests, setAvailableHarvests] = useState<EnrichedHarvestLog[]>([]);
+  const [sellableProducts, setSellableProducts] = useState<SellableProduct[]>([]);
   
   const [showCustomerForm, setShowCustomerForm] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const fetchFormData = useCallback(async () => {
     try {
-      const [customers, harvests, plantingLogs, seedBatches, crops, seedlingLogs, inputInventoryData] = await Promise.all([
+      const [customers, harvests, plantingLogs, seedBatches, crops, seedlingLogs, allInputInventory] = await Promise.all([
         db.customers.orderBy('name').filter(c => c.is_deleted !==1).toArray(),
-        db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted !== 1).reverse().toArray(),
+        db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted !== 1 && h.quantity_harvested > 0).reverse().toArray(),
         db.plantingLogs.filter(p => p.is_deleted !== 1).toArray(),
         db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
         db.crops.filter(c => c.is_deleted !== 1).toArray(),
         db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(),
-        db.inputInventory.filter(ii => ii.is_deleted !== 1 && ii.crop_id != null).toArray(), // Fetch inventory items with a crop_id
+        db.inputInventory.filter(ii => ii.is_deleted !== 1 && (ii.current_quantity ?? 0) > 0).toArray(), // Fetch all relevant inventory
       ]);
-      // console.log("SaleForm fetchFormData - Fetched inputInventoryData:", inputInventoryData);
-      // console.log("SaleForm fetchFormData - Fetched plantingLogs:", plantingLogs);
-      // console.log("SaleForm fetchFormData - Fetched seedBatches:", seedBatches);
-      // console.log("SaleForm fetchFormData - Fetched crops:", crops);
-      // console.log("SaleForm fetchFormData - Fetched seedlingLogs:", seedlingLogs);
       setAvailableCustomers(customers);
       
-      const cropsMap = new Map(crops.map(c => [c.id, c])); // For efficient lookup
+      const cropsMap = new Map(crops.map(c => [c.id, c]));
+      const products: SellableProduct[] = [];
 
-      // console.log(`SaleForm: Fetched harvests count: ${harvests.length}`);
-      const enrichedHarvests = harvests.map(h => {
-        // console.log(`SaleForm: Processing HL ID: ${h.id}, PL_ID: ${h.planting_log_id}`);
+      // Process Harvest Logs
+      harvests.forEach(h => {
         const pLog = plantingLogs.find(pl => pl.id === h.planting_log_id);
-        let cropName = 'Unknown Crop';
-        
+        let cropName = 'Unknown Harvested Crop';
         if (pLog) {
-          if (pLog.input_inventory_id) {
-            const inventoryItem = inputInventoryData.find(ii => ii.id === pLog.input_inventory_id);
-            if (inventoryItem && inventoryItem.crop_id) {
-              const crop = cropsMap.get(inventoryItem.crop_id);
-              if (crop) cropName = crop.name || 'Unnamed Crop';
-            }
+          if (pLog.input_inventory_id) { // Seeds/seedlings from inventory
+            const invItem = allInputInventory.find(ii => ii.id === pLog.input_inventory_id);
+            if (invItem && invItem.crop_id) cropName = cropsMap.get(invItem.crop_id)?.name || invItem.name || cropName;
+            else if (invItem) cropName = invItem.name || cropName;
           } else if (pLog.seedling_production_log_id) {
             const sLog = seedlingLogs.find(sl => sl.id === pLog.seedling_production_log_id);
-            if (sLog) {
-              if (sLog.crop_id) {
-                const crop = cropsMap.get(sLog.crop_id);
-                if (crop) cropName = crop.name || 'Unnamed Crop';
-              }
-              if (cropName === 'Unknown Crop' && sLog.seed_batch_id) { // Fallback for seedling log
-                const sBatch = seedBatches.find(sb => sb.id === sLog.seed_batch_id);
-                if (sBatch && sBatch.crop_id) {
-                  const crop = cropsMap.get(sBatch.crop_id);
-                  if (crop) cropName = crop.name || 'Unnamed Crop';
-                }
-              }
-            }
+            if (sLog && sLog.crop_id) cropName = cropsMap.get(sLog.crop_id)?.name || cropName;
           } else if (pLog.seed_batch_id) {
             const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
-            if (sBatch && sBatch.crop_id) {
-              const crop = cropsMap.get(sBatch.crop_id);
-              if (crop) cropName = crop.name || 'Unnamed Crop';
-            }
+            if (sBatch && sBatch.crop_id) cropName = cropsMap.get(sBatch.crop_id)?.name || cropName;
           }
         }
-        return { ...h, cropName, plantingDate: pLog?.planting_date };
+        products.push({
+          id: h.id,
+          displayName: `${cropName} (Harvested: ${new Date(h.harvest_date).toLocaleDateString()})`,
+          // Use current_quantity_available if it exists, otherwise fallback to quantity_harvested
+          availableQuantity: h.current_quantity_available !== undefined ? h.current_quantity_available : h.quantity_harvested,
+          quantityUnit: h.quantity_unit,
+          sourceType: 'harvest',
+          originalRecord: h,
+        });
       });
-      setAvailableHarvests(enrichedHarvests);
+
+      // Process Input Inventory (Purchased Goods, etc.)
+      allInputInventory.forEach(ii => {
+        // Assuming 'Purchased Goods' or similar type are directly sellable
+        // Add more sophisticated filtering if needed (e.g., a sellable flag on InputInventory)
+        if (ii.type === 'Purchased Goods' || ii.type === 'Fertilizer' || ii.type === 'Pesticide' || ii.type === 'Other Input') { // Example: make more types sellable
+          products.push({
+            id: ii.id,
+            displayName: `${ii.name} (Stock)`,
+            availableQuantity: ii.current_quantity || 0,
+            quantityUnit: ii.quantity_unit || 'unit',
+            sourceType: 'inventory',
+            originalRecord: ii,
+          });
+        }
+      });
+      setSellableProducts(products.sort((a,b) => a.displayName.localeCompare(b.displayName)));
 
     } catch (error) {
       console.error("Failed to fetch form data for sales", error);
-      setFormError("Could not load customer or harvest data.");
+      setFormError("Could not load customer or product data.");
     }
   }, []);
 
   useEffect(() => {
-    fetchFormData();
+    fetchFormData(); // Call it once when component mounts or initialData changes
+  }, [fetchFormData]); // fetchFormData is stable due to useCallback
+
+
+  useEffect(() => { // Separate useEffect for initializing form based on initialData and fetched products
     if (initialData) {
       setSaleDate(initialData.sale_date ? initialData.sale_date.split('T')[0] : new Date().toISOString().split('T')[0]);
       setCustomerId(initialData.customer_id || undefined);
@@ -114,68 +128,84 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
       setPaymentMethod(initialData.payment_method || 'on_account');
       setPaymentStatus(initialData.payment_status || 'unpaid');
       setAmountPaid(initialData.amount_paid === undefined || initialData.amount_paid === null ? '' : initialData.amount_paid);
-      if (initialData.items) {
+      
+      if (initialData.items && sellableProducts.length > 0) { // Ensure sellableProducts is populated
          const initialItems = initialData.items.map((item, index) => {
-            // Ensure availableHarvests is populated before trying to find
-            const harvest = availableHarvests.length > 0 ? availableHarvests.find(h => h.id === item.harvest_log_id) : undefined;
+            const product = sellableProducts.find(p =>
+                (item.harvest_log_id && p.sourceType === 'harvest' && p.id === item.harvest_log_id) ||
+                (item.input_inventory_id && p.sourceType === 'inventory' && p.id === item.input_inventory_id)
+            );
             return {
                 ...item,
                 key: `item-${index}-${Date.now()}`,
-                availableQuantity: harvest?.quantity_harvested,
-                cropName: harvest?.cropName,
+                selectedProductId: product?.id,
+                productName: product?.displayName,
+                availableQuantity: product?.availableQuantity,
+                sourceType: product?.sourceType,
                 quantity_sold: item.quantity_sold,
                 price_per_unit: item.price_per_unit,
-                discount_type: item.discount_type || null, // Initialize from data
-                discount_value: item.discount_value || null // Initialize from data
+                discount_type: item.discount_type || null,
+                discount_value: item.discount_value || null
             };
         });
         setItems(initialItems);
-      } else {
-        setItems([{ key: `item-0-${Date.now()}`, harvest_log_id: '', quantity_sold: 0, price_per_unit: 0, discount_type: null, discount_value: null, notes: '' }]);
+      } else if (!initialData.items) { // If new sale, or initialData has no items
+        setItems([{ key: `item-0-${Date.now()}`, quantity_sold: 0, price_per_unit: 0, discount_type: null, discount_value: null, notes: '' }]);
       }
-    } else {
+    } else { // New Sale
       setSaleDate(new Date().toISOString().split('T')[0]);
       setPaymentMethod('on_account');
       setPaymentStatus('unpaid');
       setAmountPaid('');
-      setItems([{ key: `item-0-${Date.now()}`, harvest_log_id: '', quantity_sold: 0, price_per_unit: 0, discount_type: null, discount_value: null, notes: '' }]);
+      setItems([{ key: `item-0-${Date.now()}`, quantity_sold: 0, price_per_unit: 0, discount_type: null, discount_value: null, notes: '' }]);
     }
-  }, [initialData, fetchFormData]);
+  }, [initialData, sellableProducts]); // Re-run when initialData or sellableProducts changes
 
-  const handleItemChange = (index: number, field: keyof SaleItem | 'quantity_sold_str' | 'price_per_unit_str' | 'discount_value_str', value: unknown) => {
+
+  const handleItemChange = (index: number, field: keyof SaleItem | 'quantity_sold_str' | 'price_per_unit_str' | 'discount_value_str' | 'selectedProductId', value: unknown) => {
     const newItemsState = [...items];
-    const currentItem = { ...newItemsState[index] } as Partial<SaleItem & { key: string, availableQuantity?: number, cropName?: string }>;
+    const currentItem = { ...newItemsState[index] } as Partial<SaleItem & { key: string, availableQuantity?: number, productName?: string, selectedProductId?: string, sourceType?: 'harvest' | 'inventory' }>;
 
-    if (field === 'quantity_sold_str') {
-        // For quantity, allow integer or decimal, parseFloat is fine.
+    if (field === 'selectedProductId') {
+        const selectedProduct = sellableProducts.find(p => p.id === (value as string));
+        if (selectedProduct) {
+            currentItem.selectedProductId = selectedProduct.id;
+            currentItem.productName = selectedProduct.displayName;
+            currentItem.availableQuantity = selectedProduct.availableQuantity;
+            currentItem.sourceType = selectedProduct.sourceType;
+            if (selectedProduct.sourceType === 'harvest') {
+                currentItem.harvest_log_id = selectedProduct.id;
+                currentItem.input_inventory_id = undefined;
+            } else if (selectedProduct.sourceType === 'inventory') {
+                currentItem.input_inventory_id = selectedProduct.id;
+                currentItem.harvest_log_id = undefined;
+            }
+        } else {
+            currentItem.selectedProductId = undefined;
+            currentItem.productName = undefined;
+            currentItem.availableQuantity = undefined;
+            currentItem.sourceType = undefined;
+            currentItem.harvest_log_id = undefined;
+            currentItem.input_inventory_id = undefined;
+        }
+    } else if (field === 'quantity_sold_str') {
         currentItem.quantity_sold = value === '' ? undefined : parseFloat(value as string);
     } else if (field === 'price_per_unit_str') {
-        // For price, ensure it's parsed as a float.
-        // The input type="number" step="0.01" will help with user input.
         currentItem.price_per_unit = value === '' ? undefined : parseFloat(value as string);
     } else if (field === 'discount_value_str') {
         currentItem.discount_value = value === '' ? null : parseFloat(value as string);
     } else if (field === 'discount_type') {
         currentItem.discount_type = value === '' ? null : (value as SaleItem['discount_type']);
-        // If switching type, might want to clear discount_value or validate
         if (value === null || value === '') currentItem.discount_value = null;
+    } else if (field === 'notes') {
+        currentItem.notes = value as string | undefined;
+    } else if (field === 'quantity_sold' && typeof value === 'number') {
+        currentItem.quantity_sold = value;
+    } else if (field === 'price_per_unit' && typeof value === 'number') {
+        currentItem.price_per_unit = value;
     }
-     else {
-        // Handle specific string fields of SaleItem
-        if (field === 'harvest_log_id') {
-            currentItem.harvest_log_id = value as string;
-        } else if (field === 'notes') {
-            currentItem.notes = value as string | undefined; // notes can be string or undefined
-        }
-        // No other string fields on SaleItem are expected to be set via this generic path.
-        // quantity_unit is not directly on SaleItem for this form's purpose.
-    }
+    // Other direct SaleItem fields are not typically set this way in this form after product selection
     
-    if (field === 'harvest_log_id' && value) {
-        const selectedHarvest = availableHarvests.find(h => h.id === value);
-        currentItem.availableQuantity = selectedHarvest?.quantity_harvested; // This is fine
-        currentItem.cropName = selectedHarvest?.cropName; // This is fine
-    }
     newItemsState[index] = currentItem;
     setItems(newItemsState);
   };
@@ -183,7 +213,7 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
   const addItem = () => {
     setItems([...items, {
         key: `item-${items.length}-${Date.now()}`,
-        harvest_log_id: '',
+        // harvest_log_id and input_inventory_id will be set upon product selection
         quantity_sold: 0,
         price_per_unit: 0,
         discount_type: null,
@@ -234,9 +264,14 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
     }
 
     const saleItemsData: Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'>[] = [];
-    for (const [index, item] of items.entries()) { // Use .entries() to get index
-      if (!item.harvest_log_id || item.quantity_sold === undefined || item.price_per_unit === undefined || Number(item.quantity_sold) <= 0 || Number(item.price_per_unit) < 0) { // Allow 0 price, but not negative
+    for (const [index, item] of items.entries()) {
+      if (!item.selectedProductId || item.quantity_sold === undefined || item.price_per_unit === undefined || Number(item.quantity_sold) <= 0 || Number(item.price_per_unit) < 0) {
         setFormError(`Item ${index + 1}: Product, valid Quantity (>0), and Price (>=0) are required.`);
+        return;
+      }
+      // Validate quantity against available stock
+      if (item.availableQuantity !== undefined && Number(item.quantity_sold) > item.availableQuantity) {
+        setFormError(`Item ${index + 1} (${item.productName || 'Selected Product'}): Quantity sold (${Number(item.quantity_sold)}) exceeds available stock (${item.availableQuantity}).`);
         return;
       }
       if (isNaN(Number(item.quantity_sold)) || isNaN(Number(item.price_per_unit))) {
@@ -253,20 +288,28 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
           setFormError(`Item ${index + 1}: Percentage discount cannot exceed 100.`);
           return;
         }
-      } else if (item.discount_value !== undefined && item.discount_value !== null && Number(item.discount_value) !== 0) { // Allow 0 discount value if type is null
+      } else if (item.discount_value !== undefined && item.discount_value !== null && Number(item.discount_value) !== 0) {
          setFormError(`Item ${index + 1}: Discount Value should only be set if Discount Type is selected (or set to 0 if no discount).`);
          return;
       }
 
-
-      saleItemsData.push({
-        harvest_log_id: item.harvest_log_id,
+      const saleItemEntry: Omit<SaleItem, 'id' | 'sale_id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> = {
         quantity_sold: Number(item.quantity_sold),
         price_per_unit: Number(item.price_per_unit),
         discount_type: item.discount_type || null,
         discount_value: (item.discount_type && item.discount_value !== null && item.discount_value !== undefined) ? Number(item.discount_value) : null,
         notes: item.notes,
-      });
+      };
+
+      if (item.sourceType === 'harvest' && item.harvest_log_id) {
+        saleItemEntry.harvest_log_id = item.harvest_log_id;
+      } else if (item.sourceType === 'inventory' && item.input_inventory_id) {
+        saleItemEntry.input_inventory_id = item.input_inventory_id;
+      } else {
+        setFormError(`Item ${index + 1}: Product source is unclear or ID is missing.`);
+        return;
+      }
+      saleItemsData.push(saleItemEntry);
     }
 
     const saleData = {
@@ -434,26 +477,26 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                   <div className="md:col-span-2">
-                    <label htmlFor={`itemHarvest-${index}`} className="block text-xs font-medium text-gray-700">Product (Harvest Log) <span className="text-red-500">*</span></label>
+                    <label htmlFor={`itemProduct-${index}`} className="block text-xs font-medium text-gray-700">Product <span className="text-red-500">*</span></label>
                     <select
-                      id={`itemHarvest-${index}`}
-                      value={item.harvest_log_id || ''}
-                      onChange={(e) => handleItemChange(index, 'harvest_log_id', e.target.value)}
+                      id={`itemProduct-${index}`}
+                      value={item.selectedProductId || ''}
+                      onChange={(e) => handleItemChange(index, 'selectedProductId', e.target.value)}
                       className="mt-1 block w-full px-2 py-1.5 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-xs"
                       required
                       disabled={isSubmitting}
                     >
-                      <option value="">Select Harvested Product</option>
-                      {availableHarvests.map(h => (
-                        <option key={h.id} value={h.id}>
-                          {h.cropName} (Harvested: {new Date(h.harvest_date).toLocaleDateString()}) - Qty: {h.quantity_harvested} {h.quantity_unit}
+                      <option value="">Select Product</option>
+                      {sellableProducts.map(p => (
+                        <option key={`${p.sourceType}-${p.id}`} value={p.id}>
+                          {p.displayName} (Avail: {p.availableQuantity} {p.quantityUnit})
                         </option>
                       ))}
                     </select>
-                    {item.harvest_log_id && item.availableQuantity !== undefined && <p className="text-xs text-gray-500 mt-0.5">Available: {item.availableQuantity}</p>}
+                    {item.selectedProductId && item.availableQuantity !== undefined && <p className="text-xs text-gray-500 mt-0.5">Selected: {item.productName} | Available: {item.availableQuantity}</p>}
                   </div>
                   <div>
-                    <label htmlFor={`itemQty-${index}`} className="block text-xs font-medium text-gray-700">Quantity <span className="text-red-500">*</span></label>
+                    <label htmlFor={`itemQty-${index}`} className="block text-xs font-medium text-gray-700">Quantity Sold <span className="text-red-500">*</span></label>
                     <input
                       type="text" 
                       id={`itemQty-${index}`}

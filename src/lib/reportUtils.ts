@@ -4,10 +4,323 @@ import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
-// Removed unused interface DetailedSaleItemReport
+// --- Dashboard Metrics Calculation ---
+export interface DashboardMetrics {
+  totalRevenue: number;
+  numberOfSales: number;
+  avgSaleValue: number;
+  topCustomer?: { name: string; totalValue: number }; // Optional
+  totalCOGS: number;
+  grossProfit: number;
+  // Potentially add more metrics like total expenses from supplier invoices (not just COGS)
+  // totalInputExpenses?: number;
+}
+
+export async function calculateDashboardMetrics(filters?: DateRangeFilters): Promise<DashboardMetrics> {
+  console.log('[DashboardMetrics] Calculating metrics with filters:', JSON.stringify(filters));
+  let salesQuery = db.sales.filter(s => s.is_deleted !== 1);
+  if (filters?.startDate) {
+    const start = new Date(filters.startDate).toISOString().split('T')[0];
+    salesQuery = salesQuery.and(s => s.sale_date >= start);
+  }
+  if (filters?.endDate) {
+    const end = new Date(filters.endDate).toISOString().split('T')[0];
+    salesQuery = salesQuery.and(s => s.sale_date <= end);
+  }
+  const sales = await salesQuery.toArray();
+  const saleIds = sales.map(s => s.id);
+
+  const saleItems = await db.saleItems.where('sale_id').anyOf(saleIds).and(si => si.is_deleted !== 1).toArray();
+  console.log(`[DashboardMetrics] Fetched ${sales.length} sales and ${saleItems.length} sale items.`);
+  if (saleItems.length > 0) {
+    console.log('[DashboardMetrics] First sale item details:', JSON.stringify(saleItems[0]));
+  }
+  
+  // Fetch all potentially relevant data for COGS calculations
+  const inputInventoryIdsFromSaleItems = saleItems.map(si => si.input_inventory_id).filter(id => !!id) as string[];
+  const harvestLogIdsFromSaleItems = saleItems.map(si => si.harvest_log_id).filter(id => !!id) as string[];
+
+  const relevantInputInventoryPromise = inputInventoryIdsFromSaleItems.length > 0
+    ? db.inputInventory.where('id').anyOf(inputInventoryIdsFromSaleItems).toArray()
+    : Promise.resolve([]);
+  
+  const relevantHarvestLogsPromise = harvestLogIdsFromSaleItems.length > 0
+    ? db.harvestLogs.where('id').anyOf(harvestLogIdsFromSaleItems).toArray()
+    : Promise.resolve([]);
+
+  // Fetch all planting logs that could be related to the fetched harvest logs
+  // And then fetch all harvest logs related to THOSE planting logs for accurate total harvest quantity.
+  const tempRelevantHarvestLogs = await relevantHarvestLogsPromise; // Await here to get IDs
+  console.log('[DashboardMetrics] tempRelevantHarvestLogs (from sale items):', JSON.stringify(tempRelevantHarvestLogs.map(hl => ({id: hl.id, pId: hl.planting_log_id}))));
+
+  const plantingLogIdsFromRelevantHarvests = [...new Set(tempRelevantHarvestLogs.map(hl => hl.planting_log_id).filter(id => !!id) as string[])];
+  console.log('[DashboardMetrics] plantingLogIdsFromRelevantHarvests:', JSON.stringify(plantingLogIdsFromRelevantHarvests));
+
+  const relevantPlantingLogsPromise = plantingLogIdsFromRelevantHarvests.length > 0
+    ? db.plantingLogs.where('id').anyOf(plantingLogIdsFromRelevantHarvests).and(p => p.is_deleted !== 1).toArray() // Added is_deleted filter
+    : Promise.resolve([]);
+
+  // Fetch all harvest logs associated with the relevant planting logs
+  const allHarvestsForRelevantPlantingsPromise = plantingLogIdsFromRelevantHarvests.length > 0
+    ? db.harvestLogs.where('planting_log_id').anyOf(plantingLogIdsFromRelevantHarvests).and(h => h.is_deleted !== 1).toArray()
+    : Promise.resolve([]);
+  
+  const allCultivationLogsPromise = db.cultivationLogs.filter(cl => cl.is_deleted !== 1).toArray();
+  const allInputInventoryPromise = db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray(); // For all cost lookups
+  const customersPromise = db.customers.filter(c => c.is_deleted !== 1).toArray();
+  const allSeedBatchesPromise = db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray();
+  const allSeedlingProductionLogsPromise = db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray();
+
+  const [
+    relevantInputInventory, // Directly linked to sale items
+    relevantHarvestLogs,    // Directly linked to sale items
+    relevantPlantingLogs,
+    allHarvestsForRelevantPlantings, // These are for calculating total yield per planting
+    allCultivationLogs,
+    allInputInventory, // Comprehensive list for all cost lookups
+    customers,
+    allSeedBatches,
+    allSeedlingProductionLogs
+  ] = await Promise.all([
+    relevantInputInventoryPromise,
+    Promise.resolve(tempRelevantHarvestLogs), // Use the already awaited version
+    relevantPlantingLogsPromise,
+    allHarvestsForRelevantPlantingsPromise,
+    allCultivationLogsPromise,
+    allInputInventoryPromise,
+    customersPromise,
+    allSeedBatchesPromise,
+    allSeedlingProductionLogsPromise
+  ]);
+    
+  // ---- START DEBUG BLOCK ----
+  if (plantingLogIdsFromRelevantHarvests.length > 0) {
+    const idToTest = plantingLogIdsFromRelevantHarvests[0]; // Assuming "cef3b0f9-989e-48d0-b36a-002a87355abf"
+    console.log(`[DashboardMetrics DEBUG] Testing PlantingLog ID: "${idToTest}" (Type: ${typeof idToTest}, Length: ${idToTest.length})`);
+    
+    // Log the exact ID from the HarvestLog that generated this idToTest
+    const sourceHarvestLog = tempRelevantHarvestLogs.find(hl => hl.planting_log_id === idToTest);
+    if (sourceHarvestLog) {
+      console.log(`[DashboardMetrics DEBUG] ID "${idToTest}" came from HarvestLog.planting_log_id: "${sourceHarvestLog.planting_log_id}" (HL ID: ${sourceHarvestLog.id})`);
+    }
+
+    const directCheckPlantingLog = await db.plantingLogs.get(idToTest);
+    console.log(`[DashboardMetrics DEBUG] Result of db.plantingLogs.get("${idToTest}"):`, JSON.stringify(directCheckPlantingLog));
+    
+    const allNonDeletedPlantingLogs = await db.plantingLogs.filter(p => p.is_deleted !== 1).toArray();
+    console.log(`[DashboardMetrics DEBUG] Total non-deleted PlantingLogs in DB: ${allNonDeletedPlantingLogs.length}`);
+    const foundInAll = allNonDeletedPlantingLogs.find(p => p.id === idToTest);
+    console.log(`[DashboardMetrics DEBUG] PlantingLog "${idToTest}" found in allNonDeletedPlantingLogs:`, JSON.stringify(foundInAll));
+
+    const checkQueryEquals = db.plantingLogs.where('id').equals(idToTest).and(p => p.is_deleted !== 1);
+    const countEquals = await checkQueryEquals.count();
+    console.log(`[DashboardMetrics DEBUG] Count for .equals("${idToTest}"): ${countEquals}`);
+    
+    const checkQueryEqualsIgnoreCase = db.plantingLogs.where('id').equalsIgnoreCase(idToTest).and(p => p.is_deleted !== 1);
+    const countEqualsIgnoreCase = await checkQueryEqualsIgnoreCase.count();
+    console.log(`[DashboardMetrics DEBUG] Count for .equalsIgnoreCase("${idToTest}"): ${countEqualsIgnoreCase}`);
+
+    const itemsFromQueryEqualsIgnoreCase = await checkQueryEqualsIgnoreCase.toArray();
+    console.log(`[DashboardMetrics DEBUG] Items from .equalsIgnoreCase("${idToTest}"):`, JSON.stringify(itemsFromQueryEqualsIgnoreCase));
+  }
+  // ---- END DEBUG BLOCK ----
+
+  console.log('[DashboardMetrics] Resolved relevantPlantingLogs count:', relevantPlantingLogs.length);
+  console.log('[DashboardMetrics] Resolved allHarvestsForRelevantPlantings count:', allHarvestsForRelevantPlantings.length);
+  console.log('[DashboardMetrics] Resolved allCultivationLogs count:', allCultivationLogs.length);
+  console.log('[DashboardMetrics] Resolved allInputInventory count (for costs):', allInputInventory.length);
+  console.log('[DashboardMetrics] Resolved allSeedBatches count:', allSeedBatches.length);
+  console.log('[DashboardMetrics] Resolved allSeedlingProductionLogs count:', allSeedlingProductionLogs.length);
+
+  const inventoryMap = new Map(allInputInventory.map(ii => [ii.id, ii]));
+  const customerMap = new Map(customers.map(c => [c.id, c.name]));
+  const plantingLogMap = new Map(relevantPlantingLogs.map(pl => [pl.id, pl]));
+  console.log('[DashboardMetrics] relevantPlantingLogs count for map:', relevantPlantingLogs.length, 'plantingLogMap size:', plantingLogMap.size);
+  
+  const seedBatchMap = new Map(allSeedBatches.map(sb => [sb.id, sb]));
+  const seedlingLogMap = new Map(allSeedlingProductionLogs.map(sl => [sl.id, sl]));
+
+  // Create a map for total harvested quantity per planting log for efficiency
+  const totalHarvestedPerPlantingLog = new Map<string, number>();
+  allHarvestsForRelevantPlantings.forEach(hl => {
+    totalHarvestedPerPlantingLog.set(
+      hl.planting_log_id,
+      (totalHarvestedPerPlantingLog.get(hl.planting_log_id) || 0) + hl.quantity_harvested
+    );
+  });
+  console.log('[DashboardMetrics] totalHarvestedPerPlantingLog map:', JSON.stringify(Array.from(totalHarvestedPerPlantingLog.entries())));
+
+
+  let totalRevenue = 0;
+  let totalCOGS = 0;
+  const customerSales: Record<string, number> = {};
+
+  for (const sale of sales) {
+    if (sale.customer_id && customerMap.has(sale.customer_id)) {
+        const custName = customerMap.get(sale.customer_id)!;
+        customerSales[custName] = (customerSales[custName] || 0) + (sale.total_amount || 0);
+    }
+  }
+  
+  for (const item of saleItems) {
+    const quantity = Number(item.quantity_sold);
+    const price = Number(item.price_per_unit);
+    let itemRevenue = 0;
+    if (!isNaN(quantity) && !isNaN(price)) {
+      itemRevenue = quantity * price;
+      if (item.discount_type && (item.discount_value !== null && item.discount_value !== undefined)) {
+        const discountValue = Number(item.discount_value);
+        if (item.discount_type === 'Amount') {
+          itemRevenue -= discountValue;
+        } else if (item.discount_type === 'Percentage') {
+          itemRevenue -= itemRevenue * (discountValue / 100);
+        }
+      }
+    }
+    totalRevenue += Math.max(0, itemRevenue);
+
+    // Calculate COGS for this item
+    if (item.input_inventory_id) {
+      const inventoryBatch = inventoryMap.get(item.input_inventory_id);
+      if (inventoryBatch && inventoryBatch.initial_quantity && inventoryBatch.initial_quantity > 0 && inventoryBatch.total_purchase_cost !== undefined) {
+        const costPerUnit = inventoryBatch.total_purchase_cost / inventoryBatch.initial_quantity;
+        totalCOGS += costPerUnit * quantity;
+      } else if (inventoryBatch && inventoryBatch.total_purchase_cost !== undefined) {
+        // Fallback if initial_quantity is not set or 0, assume total_purchase_cost is for the quantity sold (less accurate)
+        // This might happen if an item is sold as a whole batch and initial_quantity wasn't a focus.
+        // For accurate COGS, initial_quantity and total_purchase_cost for that initial_quantity are essential.
+        // If selling a portion of a batch where initial_quantity was 1, this logic is fine.
+        if (inventoryBatch.initial_quantity === 1 || !inventoryBatch.initial_quantity) {
+             totalCOGS += inventoryBatch.total_purchase_cost * quantity; // Assuming cost is per unit if initial_quantity is 1 or not set
+        } else {
+            console.warn(`COGS calculation issue for SaleItem ${item.id}: InputInventory ${inventoryBatch.id} has initial_quantity ${inventoryBatch.initial_quantity} but sold ${quantity}. Total cost ${inventoryBatch.total_purchase_cost}`);
+        }
+      }
+    } else if (item.harvest_log_id) {
+      const harvestLog = relevantHarvestLogs.find(hl => hl.id === item.harvest_log_id);
+      if (harvestLog) {
+        const plantingLog = plantingLogMap.get(harvestLog.planting_log_id);
+        if (plantingLog) {
+          // Calculate total cost for this plantingLog
+          let totalCostForPlanting = 0;
+          let seedCostForPlanting = 0;
+
+          // 1. Cost of seeds/seedlings
+          if (plantingLog.input_inventory_id) { // Direct link from PlantingLog to purchased seeds/seedlings
+            const seedInvItem = inventoryMap.get(plantingLog.input_inventory_id);
+            if (seedInvItem && seedInvItem.total_purchase_cost !== undefined) {
+              seedCostForPlanting = seedInvItem.total_purchase_cost; // Assumes this inventory item was entirely for this planting
+              console.log(`[COGS Harvest] Seed cost from PlantingLog.input_inventory_id ${plantingLog.input_inventory_id}: ${seedCostForPlanting}`);
+            }
+          } else if (plantingLog.seedling_production_log_id) { // Trace via SeedlingProductionLog
+            console.log(`[COGS Harvest] Tracing seed cost via SeedlingProductionLog ID: ${plantingLog.seedling_production_log_id}`);
+            const seedlingLog = seedlingLogMap.get(plantingLog.seedling_production_log_id);
+            if (seedlingLog) {
+              console.log(`[COGS Harvest] Found SeedlingLog, its seed_batch_id: ${seedlingLog.seed_batch_id}`);
+              if (seedlingLog.seed_batch_id) {
+                const seedBatch = seedBatchMap.get(seedlingLog.seed_batch_id);
+                if (seedBatch) {
+                  console.log(`[COGS Harvest] Found SeedBatch ${seedBatch.id}, cost: ${seedBatch.total_purchase_cost}, initial_qty: ${seedBatch.initial_quantity}`);
+                  if (seedBatch.total_purchase_cost !== undefined && seedBatch.initial_quantity !== undefined && seedBatch.initial_quantity > 0) {
+                    // Simplification: If a SeedlingProductionLog used a purchased SeedBatch, attribute a portion of that cost.
+                    // This needs a robust way to know how many seeds from the batch were used for *this* seedling production.
+                    // For now, if `estimated_total_individual_seeds_sown` is on seedlingLog:
+                    if (seedlingLog.estimated_total_individual_seeds_sown && seedlingLog.estimated_total_individual_seeds_sown > 0) {
+                        const costPerOriginalSeed = seedBatch.total_purchase_cost / seedBatch.initial_quantity;
+                        const totalSeedCostForSeedlingLog = costPerOriginalSeed * seedlingLog.estimated_total_individual_seeds_sown;
+                        // Apportion this cost to the current plantingLog based on seedlings planted vs produced
+                        if (seedlingLog.actual_seedlings_produced && seedlingLog.actual_seedlings_produced > 0 && plantingLog.quantity_planted > 0) {
+                            seedCostForPlanting = (plantingLog.quantity_planted / seedlingLog.actual_seedlings_produced) * totalSeedCostForSeedlingLog;
+                        } else { // Fallback: use total seed cost for seedling log if apportionment details missing
+                            seedCostForPlanting = totalSeedCostForSeedlingLog;
+                        }
+                        console.log(`[COGS Harvest] Seed cost (apportioned via SeedlingLog) from SeedBatch ${seedBatch.id}: ${seedCostForPlanting}`);
+                    } else { // Fallback: use total cost of seed batch if specific seed count not available for seedling log
+                        seedCostForPlanting = seedBatch.total_purchase_cost; // This is a rough estimate
+                        console.log(`[COGS Harvest] Seed cost (fallback via SeedlingLog using full SeedBatch ${seedBatch.id} cost): ${seedCostForPlanting}`);
+                    }
+                  } else {
+                    console.log(`[COGS Harvest] SeedBatch ${seedBatch.id} has no cost or initial_quantity.`);
+                  }
+                } else {
+                  console.warn(`[COGS Harvest] SeedBatch ${seedlingLog.seed_batch_id} (from SeedlingLog) not found in seedBatchMap.`);
+                }
+              } else {
+                 console.log(`[COGS Harvest] SeedlingLog ${seedlingLog.id} has no seed_batch_id.`);
+              }
+            } else {
+              console.warn(`[COGS Harvest] SeedlingProductionLog ${plantingLog.seedling_production_log_id} not found in seedlingLogMap.`);
+            }
+          } else if (plantingLog.seed_batch_id) { // Direct link from PlantingLog to SeedBatch
+             console.log(`[COGS Harvest] Tracing seed cost via PlantingLog.seed_batch_id: ${plantingLog.seed_batch_id}`);
+             const seedBatch = seedBatchMap.get(plantingLog.seed_batch_id);
+             if (seedBatch) {
+                console.log(`[COGS Harvest] Found SeedBatch ${seedBatch.id}, cost: ${seedBatch.total_purchase_cost}`);
+                if (seedBatch.total_purchase_cost !== undefined) {
+                  // This assumes the entire seed batch was used for this planting, which might not be true.
+                  // Apportionment would be needed for accuracy if a seed batch serves multiple plantings.
+                  seedCostForPlanting = seedBatch.total_purchase_cost;
+                  console.log(`[COGS Harvest] Seed cost directly from SeedBatch ${seedBatch.id}: ${seedCostForPlanting}`);
+                } else {
+                  console.log(`[COGS Harvest] SeedBatch ${seedBatch.id} has no total_purchase_cost.`);
+                }
+             } else {
+                console.warn(`[COGS Harvest] SeedBatch ${plantingLog.seed_batch_id} (from PlantingLog) not found in seedBatchMap.`);
+             }
+          }
+          totalCostForPlanting += seedCostForPlanting;
+
+          // 2. Cost of cultivation inputs for this planting log
+          const cultivationLogsForPlanting = allCultivationLogs.filter(cl => cl.planting_log_id === plantingLog.id);
+          for (const cl of cultivationLogsForPlanting) {
+            if (cl.input_inventory_id && cl.input_quantity_used) {
+              const inputUsed = inventoryMap.get(cl.input_inventory_id);
+              if (inputUsed && inputUsed.initial_quantity && inputUsed.initial_quantity > 0 && inputUsed.total_purchase_cost !== undefined) {
+                const costPerUnitInput = inputUsed.total_purchase_cost / inputUsed.initial_quantity;
+                totalCostForPlanting += costPerUnitInput * cl.input_quantity_used;
+              }
+            }
+          }
+
+          // Get total quantity harvested from this specific planting log
+          // This requires fetching ALL harvest logs for this planting_log_id, not just the one linked to the sale item.
+          const allHarvestsForThisPlanting = await db.harvestLogs.where('planting_log_id').equals(plantingLog.id).and(h => h.is_deleted !== 1).toArray();
+          const totalQuantityHarvestedForPlanting = allHarvestsForThisPlanting.reduce((sum, h) => sum + h.quantity_harvested, 0);
+
+          if (totalQuantityHarvestedForPlanting > 0) {
+            const costPerUnitHarvested = totalCostForPlanting / totalQuantityHarvestedForPlanting;
+            totalCOGS += costPerUnitHarvested * quantity; // quantity is item.quantity_sold
+          } else {
+            console.warn(`COGS for harvested item ${item.id} from planting ${plantingLog.id}: Total harvested quantity is 0. Cannot calculate COGS.`);
+          }
+        }
+      }
+    }
+  }
+
+  const numberOfSales = sales.length;
+  const avgSaleValue = numberOfSales > 0 ? totalRevenue / numberOfSales : 0;
+  
+  let topCustomerData: { name: string; totalValue: number } | undefined = undefined;
+    if (Object.keys(customerSales).length > 0) {
+        const sortedCustomers = Object.entries(customerSales).sort(([,a],[,b]) => b-a);
+        topCustomerData = { name: sortedCustomers[0][0], totalValue: sortedCustomers[0][1] };
+    }
+
+  return {
+    totalRevenue,
+    numberOfSales,
+    avgSaleValue,
+    topCustomer: topCustomerData,
+    totalCOGS,
+    grossProfit: totalRevenue - totalCOGS,
+  };
+}
+// --- End of Dashboard Metrics Calculation ---
+
 
 interface SaleReportItem {
-    saleId: string;
+  saleId: string;
     saleDate: string;
     customerName: string;
     invoiceNumber: string;
@@ -21,7 +334,7 @@ interface SaleReportItem {
     saleNotes?: string;
 }
 
-interface DateRangeFilters {
+export interface DateRangeFilters {
     startDate?: string | null;
     endDate?: string | null;
 }

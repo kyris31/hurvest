@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { db, Sale, SaleItem, Customer, Invoice } from '@/lib/db'; // Removed unused HarvestLog etc. for this page directly
+import { db, Sale, SaleItem, Customer, Invoice } from '@/lib/db'; 
 import SaleList from '@/components/SaleList';
 import SaleForm from '@/components/SaleForm';
 import RecordPaymentModal from '@/components/RecordPaymentModal';
@@ -11,13 +11,8 @@ import { requestPushChanges } from '@/lib/sync';
 
 export default function SalesPage() {
   const [sales, setSales] = useState<Sale[]>([]);
-  const [saleItems, setSaleItems] = useState<SaleItem[]>([]); // Still needed for SaleList calculations
-  const [customers, setCustomers] = useState<Customer[]>([]); // Still needed for SaleList
-  // These are fetched but not directly passed to SaleList if it doesn't use them.
-  // const [harvestLogs, setHarvestLogs] = useState<HarvestLog[]>([]);
-  // const [plantingLogs, setPlantingLogs] = useState<PlantingLog[]>([]);
-  // const [seedBatches, setSeedBatches] = useState<SeedBatch[]>([]);
-  // const [crops, setCrops] = useState<Crop[]>([]);
+  const [saleItems, setSaleItems] = useState<SaleItem[]>([]); 
+  const [customers, setCustomers] = useState<Customer[]>([]); 
   
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,26 +31,14 @@ export default function SalesPage() {
         salesData,
         saleItemsData,
         customersData,
-        // harvestLogsData, // Not directly passed to SaleList if unused by it
-        // plantingLogsData,
-        // seedBatchesData,
-        // cropsData
       ] = await Promise.all([
         db.sales.orderBy('sale_date').filter(s => s.is_deleted === 0).reverse().toArray(),
         db.saleItems.where('is_deleted').equals(0).toArray(),
         db.customers.orderBy('name').filter(c => c.is_deleted === 0).toArray(),
-        // db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted === 0).reverse().toArray(),
-        // db.plantingLogs.orderBy('planting_date').filter(p => p.is_deleted === 0).reverse().toArray(),
-        // db.seedBatches.orderBy('_last_modified').filter(sb => sb.is_deleted === 0).reverse().toArray(),
-        // db.crops.orderBy('name').filter(c => c.is_deleted === 0).toArray(),
       ]);
       setSales(salesData);
       setSaleItems(saleItemsData);
       setCustomers(customersData);
-      // setHarvestLogs(harvestLogsData);
-      // setPlantingLogs(plantingLogsData);
-      // setSeedBatches(seedBatchesData);
-      // setCrops(cropsData);
       setError(null);
     } catch (err) {
       console.error("Failed to fetch sales data:", err);
@@ -99,37 +82,57 @@ export default function SalesPage() {
     }
 
     try {
-      await db.transaction('rw', db.sales, db.saleItems, db.invoices, async () => {
+      await db.transaction('rw', [db.sales, db.saleItems, db.invoices, db.inputInventory, db.harvestLogs], async () => {
         if (editingSale) {
-          const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(editingSale.id).toArray();
-          for (const item of itemsToSoftDelete) {
-            await db.markForSync('saleItems', item.id, {}, true);
+          const oldSaleItems = await db.saleItems.where('sale_id').equals(editingSale.id).filter(si => si.is_deleted !== 1).toArray();
+          for (const oldItem of oldSaleItems) {
+            if (oldItem.input_inventory_id && oldItem.quantity_sold > 0) {
+              const invItem = await db.inputInventory.get(oldItem.input_inventory_id);
+              if (invItem) {
+                await db.inputInventory.update(oldItem.input_inventory_id, {
+                  current_quantity: (invItem.current_quantity || 0) + oldItem.quantity_sold,
+                  _last_modified: Date.now(),
+                  _synced: 0,
+                });
+                console.log(`[SaleEdit] Reverted InputInventory for ${invItem.name} by ${oldItem.quantity_sold}.`);
+              }
+            } else if (oldItem.harvest_log_id && oldItem.quantity_sold > 0) {
+              const harvestItem = await db.harvestLogs.get(oldItem.harvest_log_id);
+              if (harvestItem) {
+                await db.harvestLogs.update(oldItem.harvest_log_id, {
+                  current_quantity_available: (harvestItem.current_quantity_available || 0) + oldItem.quantity_sold,
+                  _last_modified: Date.now(),
+                  _synced: 0,
+                });
+                console.log(`[SaleEdit] Reverted HarvestLog ${harvestItem.id} by ${oldItem.quantity_sold}.`);
+              }
+            }
+            await db.markForSync('saleItems', oldItem.id, {}, true);
           }
+
           const invoiceToSoftDelete = await db.invoices.where('sale_id').equals(editingSale.id).first();
           if (invoiceToSoftDelete) {
             await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true);
           }
           
-          // Construct only the changes for the update operation
           const saleChanges: Partial<Sale> = {
-            ...saleDataFromForm, // contains payment_method, payment_status, amount_paid from form
+            ...saleDataFromForm,
             total_amount: calculatedTotalAmount,
             updated_at: now,
             _synced: 0,
             _last_modified: currentTimestamp,
-            is_deleted: 0, // Ensure it's not marked deleted if editing
+            is_deleted: 0, 
             deleted_at: undefined,
-            // payment_history is managed by RecordPaymentModal, not directly here for edits unless specifically designed
           };
           await db.sales.update(editingSale.id, saleChanges);
-        } else { // Adding new sale
+        } else { 
             const newSale: Sale = {
               id: saleId,
               ...saleDataFromForm,
               total_amount: calculatedTotalAmount,
               payment_history: (saleDataFromForm.payment_method && saleDataFromForm.amount_paid && saleDataFromForm.amount_paid > 0) ? 
                                 [{ date: saleDataFromForm.sale_date, amount: Number(saleDataFromForm.amount_paid), method: saleDataFromForm.payment_method, notes: 'Initial payment with sale' }] 
-                                : [], // Initialize payment_history
+                                : [],
               created_at: now,
               updated_at: now,
               _synced: 0,
@@ -140,19 +143,52 @@ export default function SalesPage() {
             await db.sales.add(newSale);
           }
 
-          for (const item of itemsData) {
+        for (const item of itemsData) {
             const newItemId = crypto.randomUUID();
-            await db.saleItems.add({
+            const saleItemToAdd: SaleItem = {
               id: newItemId,
               sale_id: saleId,
-              ...item,
+              harvest_log_id: item.harvest_log_id, 
+              input_inventory_id: item.input_inventory_id, 
+              quantity_sold: Number(item.quantity_sold),
+              price_per_unit: Number(item.price_per_unit),
+              discount_type: item.discount_type || null,
+              discount_value: (item.discount_type && item.discount_value !== null && item.discount_value !== undefined) ? Number(item.discount_value) : null,
+              notes: item.notes,
               created_at: now,
               updated_at: now,
               _synced: 0,
               _last_modified: currentTimestamp,
               is_deleted: 0,
               deleted_at: undefined,
-            });
+            };
+            await db.saleItems.add(saleItemToAdd);
+
+            if (item.input_inventory_id && Number(item.quantity_sold) > 0) {
+              const invItem = await db.inputInventory.get(item.input_inventory_id);
+              if (invItem) {
+                await db.inputInventory.update(item.input_inventory_id, {
+                  current_quantity: (invItem.current_quantity || 0) - Number(item.quantity_sold),
+                  _last_modified: Date.now(),
+                  _synced: 0,
+                });
+                console.log(`[SaleSubmit] Decremented InputInventory for ${invItem.name} by ${item.quantity_sold}.`);
+              } else {
+                console.warn(`[SaleSubmit] Could not find InputInventory item with ID ${item.input_inventory_id} to decrement quantity.`);
+              }
+            } else if (item.harvest_log_id && Number(item.quantity_sold) > 0) {
+              const harvestItem = await db.harvestLogs.get(item.harvest_log_id);
+              if (harvestItem) {
+                await db.harvestLogs.update(item.harvest_log_id, {
+                  current_quantity_available: (harvestItem.current_quantity_available || 0) - Number(item.quantity_sold),
+                  _last_modified: Date.now(),
+                  _synced: 0,
+                });
+                console.log(`[SaleSubmit] Decremented HarvestLog ${harvestItem.id} by ${item.quantity_sold}.`);
+              } else {
+                console.warn(`[SaleSubmit] Could not find HarvestLog item with ID ${item.harvest_log_id} to decrement quantity.`);
+              }
+            }
           }
           
           const invoiceNumber = `INV-${new Date().getFullYear()}-${String(currentTimestamp).slice(-6)}`;
@@ -213,16 +249,37 @@ export default function SalesPage() {
       setIsDeleting(id);
       setError(null);
       try {
-        await db.transaction('rw', db.sales, db.saleItems, db.invoices, async () => {
-            const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(id).toArray();
+        await db.transaction('rw', [db.sales, db.saleItems, db.invoices, db.inputInventory, db.harvestLogs], async () => {
+            const itemsToSoftDelete = await db.saleItems.where('sale_id').equals(id).filter(si => si.is_deleted !== 1).toArray(); 
             for (const item of itemsToSoftDelete) {
+              if (item.input_inventory_id && item.quantity_sold > 0) {
+                const invItem = await db.inputInventory.get(item.input_inventory_id);
+                if (invItem) {
+                  await db.inputInventory.update(item.input_inventory_id, {
+                    current_quantity: (invItem.current_quantity || 0) + item.quantity_sold,
+                    _last_modified: Date.now(),
+                    _synced: 0,
+                  });
+                  console.log(`[SaleDelete] Reverted InputInventory for ${invItem.name} by ${item.quantity_sold}.`);
+                }
+              } else if (item.harvest_log_id && item.quantity_sold > 0) {
+                const harvestItem = await db.harvestLogs.get(item.harvest_log_id);
+                if (harvestItem) {
+                  await db.harvestLogs.update(item.harvest_log_id, {
+                    current_quantity_available: (harvestItem.current_quantity_available || 0) + item.quantity_sold,
+                    _last_modified: Date.now(),
+                    _synced: 0,
+                  });
+                  console.log(`[SaleDelete] Reverted HarvestLog ${harvestItem.id} by ${item.quantity_sold}.`);
+                }
+              }
               await db.markForSync('saleItems', item.id, {}, true);
             }
             const invoiceToSoftDelete = await db.invoices.where('sale_id').equals(id).first();
             if (invoiceToSoftDelete) {
               await db.markForSync('invoices', invoiceToSoftDelete.id, {}, true);
             }
-            await db.markForSync('sales', id, {}, true);
+            await db.markForSync('sales', id, {}, true); 
         });
         
         console.log("SalesPage: Attempting immediate push after delete operation...");
@@ -282,11 +339,10 @@ export default function SalesPage() {
       let newPaymentStatus: Sale['payment_status'] = 'partially_paid';
       if (newTotalAmountPaid >= (saleToUpdate.total_amount || 0)) {
         newPaymentStatus = 'paid';
-      } else if (newTotalAmountPaid <= 0) { // if total paid becomes 0 or less (e.g. refund scenario not yet handled)
+      } else if (newTotalAmountPaid <= 0) { 
         newPaymentStatus = 'unpaid';
       }
-      // If newTotalAmountPaid is > 0 but < total_amount, it remains 'partially_paid'
-
+      
       const saleUpdates: Partial<Sale> = {
         amount_paid: newTotalAmountPaid,
         payment_status: newPaymentStatus,
@@ -359,7 +415,6 @@ export default function SalesPage() {
             sales={sales}
             customers={customers}
             saleItems={saleItems}
-            // Removed unused props: harvestLogs, plantingLogs, seedBatches, crops
             onEdit={handleEdit}
             onDelete={handleDelete}
             isDeleting={isDeleting}

@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { db, Reminder, Flock } from '@/lib/db';
+import { db, Reminder, Flock } from '@/lib/db'; // Keep existing db imports
 import { XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
 import Link from 'next/link';
+import { calculateDashboardMetrics, DashboardMetrics, DateRangeFilters } from '@/lib/reportUtils'; // Import new function and types
 
 interface MetricCardProps {
   title: string;
@@ -19,7 +20,7 @@ const MetricCard: React.FC<MetricCardProps> = ({ title, value, description }) =>
   </div>
 );
 
-interface ChartData {
+interface ChartData { // Keep for monthly chart if still used separately
   name: string;
   revenue?: number;
   costs?: number;
@@ -31,17 +32,12 @@ interface EnrichedPoultryReminder extends Reminder {
 }
 
 export default function DashboardPage() {
-  const [totalRevenue, setTotalRevenue] = useState<number>(0);
-  const [numberOfSales, setNumberOfSales] = useState<number>(0);
-  const [averageSaleValue, setAverageSaleValue] = useState<number>(0);
-  const [topCustomerName, setTopCustomerName] = useState<string>('N/A');
-  const [topCustomerValue, setTopCustomerValue] = useState<number>(0);
-  const [calculatedCogs, setCalculatedCogs] = useState<number>(0);
-  const [revenueByMonth, setRevenueByMonth] = useState<ChartData[]>([]);
+  const [dashboardData, setDashboardData] = useState<DashboardMetrics | null>(null);
+  const [revenueByMonth, setRevenueByMonth] = useState<ChartData[]>([]); // Keep for now if chart logic is separate
   
   const [upcomingPoultryReminders, setUpcomingPoultryReminders] = useState<EnrichedPoultryReminder[]>([]);
-  const [isLoading, setIsLoading] = useState(true); 
-  const [error, setError] = useState<string | null>(null); 
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate, setFilterEndDate] = useState<string>('');
@@ -50,148 +46,65 @@ export default function DashboardPage() {
     setIsLoading(true);
     setError(null);
     try {
-      let salesQuery = db.sales.filter(s => s.is_deleted !== 1);
-      let cultivationLogsQuery = db.cultivationLogs.filter(cl => cl.is_deleted !== 1);
-      let harvestLogsQuery = db.harvestLogs.filter(h => h.is_deleted !== 1);
+      const metrics = await calculateDashboardMetrics({ startDate, endDate });
+      setDashboardData(metrics);
 
-      if (startDate) {
-        const sDate = new Date(startDate).toISOString().split('T')[0];
-        salesQuery = salesQuery.and(s => s.sale_date >= sDate);
-        cultivationLogsQuery = cultivationLogsQuery.and(cl => cl.activity_date >= sDate);
-        harvestLogsQuery = harvestLogsQuery.and(h => h.harvest_date >= sDate);
-      }
-      if (endDate) {
-        const eDate = new Date(endDate).toISOString().split('T')[0];
-        salesQuery = salesQuery.and(s => s.sale_date <= eDate);
-        cultivationLogsQuery = cultivationLogsQuery.and(cl => cl.activity_date <= eDate);
-        harvestLogsQuery = harvestLogsQuery.and(h => h.harvest_date <= eDate);
-      }
-
-      const sales = await salesQuery.toArray();
-      const cultivationLogs = await cultivationLogsQuery.toArray();
-      const harvestLogs = await harvestLogsQuery.toArray();
-      
-      const saleItems = await db.saleItems.filter(si => si.is_deleted !== 1).toArray();
-      const inputInventory = await db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray();
-      const plantingLogs = await db.plantingLogs.filter(p => p.is_deleted !== 1).toArray();
-      const allFlocks = await db.flocks.filter(f => f.is_deleted !== 1).toArray();
-
-      // Fetch Upcoming Poultry Reminders
+      // Fetch Upcoming Poultry Reminders (existing logic)
       const today = new Date();
-      today.setHours(0,0,0,0); // Start of today for comparison
+      today.setHours(0,0,0,0);
+      const allFlocks = await db.flocks.filter(f => f.is_deleted !== 1).toArray();
       const poultryReminders = await db.reminders
         .where('is_deleted').notEqual(1)
-        .and(r => r.is_completed === 0 && !!r.flock_id && new Date(r.reminder_date) >= today) 
+        .and(r => r.is_completed === 0 && !!r.flock_id && new Date(r.reminder_date) >= today)
         .sortBy('reminder_date');
       
       const enrichedPoultryReminders: EnrichedPoultryReminder[] = poultryReminders.slice(0, 5).map(reminder => {
         const flock = allFlocks.find(f => f.id === reminder.flock_id);
-        return {
-          ...reminder,
-          flockName: flock?.name || 'Unknown Flock'
-        };
+        return { ...reminder, flockName: flock?.name || 'Unknown Flock' };
       });
       setUpcomingPoultryReminders(enrichedPoultryReminders);
 
-      let currentTotalRevenue = 0;
-      const salesByCustomer: Record<string, number> = {};
-      const customers = await db.customers.filter(c => c.is_deleted !== 1).toArray();
-
-      sales.forEach(sale => {
-        const itemsForSale = saleItems.filter(si => si.sale_id === sale.id);
-        let currentSaleValue = 0;
-        itemsForSale.forEach(item => {
-          const itemValue = item.quantity_sold * item.price_per_unit;
-          currentTotalRevenue += itemValue;
-          currentSaleValue += itemValue;
-        });
-        if (sale.customer_id) {
-            salesByCustomer[sale.customer_id] = (salesByCustomer[sale.customer_id] || 0) + currentSaleValue;
-        }
-      });
-      setTotalRevenue(currentTotalRevenue);
-      setNumberOfSales(sales.length);
-      setAverageSaleValue(sales.length > 0 ? currentTotalRevenue / sales.length : 0);
-
-      let maxSales = 0;
-      let topCustomerId: string | null = null;
-      for (const customerId in salesByCustomer) {
-        if (salesByCustomer[customerId] > maxSales) {
-          maxSales = salesByCustomer[customerId];
-          topCustomerId = customerId;
-        }
-      }
-
-      if (topCustomerId) {
-        const topCust = customers.find(c => c.id === topCustomerId);
-        setTopCustomerName(topCust?.name || 'Unknown Customer');
-        setTopCustomerValue(maxSales);
-      } else {
-        setTopCustomerName('N/A');
-        setTopCustomerValue(0);
-      }
-
-      const plantingLogSummaries: Map<string, { totalCosts: number; totalHarvested: number }> = new Map();
-      for (const pLog of plantingLogs) {
-        if (!pLog.id) continue;
-        let costsForThisPlanting = 0;
-        const relevantCultivationLogs = cultivationLogs.filter(cl => cl.planting_log_id === pLog.id);
-        relevantCultivationLogs.forEach(log => {
-          if (log.input_inventory_id && log.input_quantity_used) {
-            const input = inputInventory.find(inv => inv.id === log.input_inventory_id);
-            if (input && input.total_purchase_cost !== undefined && input.initial_quantity !== undefined && input.initial_quantity > 0) {
-              const costPerUnit = input.total_purchase_cost / input.initial_quantity;
-              costsForThisPlanting += log.input_quantity_used * costPerUnit;
-            }
-          }
-        });
-        const totalHarvestedFromThisPlanting = harvestLogs
-          .filter(h => h.planting_log_id === pLog.id)
-          .reduce((sum, h) => sum + h.quantity_harvested, 0);
-        plantingLogSummaries.set(pLog.id, {
-          totalCosts: costsForThisPlanting,
-          totalHarvested: totalHarvestedFromThisPlanting,
-        });
-      }
-
-      let proportionalCogs = 0;
-      const monthlyRevenueAndCogs: { [key: string]: { revenue: number, cogs: number } } = {};
-      for (const sale of sales) {
-        const itemsForThisSale = saleItems.filter(si => si.sale_id === sale.id);
-        let saleMonthCogs = 0;
-        let saleMonthRevenue = 0;
-        for (const saleItem of itemsForThisSale) {
-          saleMonthRevenue += saleItem.quantity_sold * saleItem.price_per_unit;
-          if (saleItem.harvest_log_id) {
-            const harvest = harvestLogs.find(h => h.id === saleItem.harvest_log_id);
-            if (harvest && harvest.planting_log_id) {
-              const summary = plantingLogSummaries.get(harvest.planting_log_id);
-              if (summary && summary.totalHarvested > 0) {
-                const costPerUnitOfHarvest = summary.totalCosts / summary.totalHarvested;
-                const cogsForItem = costPerUnitOfHarvest * saleItem.quantity_sold;
-                proportionalCogs += cogsForItem;
-                saleMonthCogs += cogsForItem;
-              }
-            }
-          }
-        }
-        const month = new Date(sale.sale_date).toLocaleString('default', { month: 'short', year: 'numeric' });
-        if (!monthlyRevenueAndCogs[month]) {
-            monthlyRevenueAndCogs[month] = { revenue: 0, cogs: 0 };
-        }
-        monthlyRevenueAndCogs[month].revenue += saleMonthRevenue;
-        monthlyRevenueAndCogs[month].cogs += saleMonthCogs;
-      }
-      setCalculatedCogs(proportionalCogs);
+      // TODO: Re-evaluate monthly chart data generation.
+      // For now, it might become out of sync or needs its own data fetching based on sales.
+      // The old logic for monthlyRevenueAndCogs can be adapted or moved into calculateDashboardMetrics if needed.
+      // For simplicity, let's clear it or use a simplified version if dashboardData has enough.
+      // This part needs to be revisited if the monthly chart is critical with the new metrics structure.
+      // For now, let's assume the monthly chart might need separate data or be simplified.
+      // The old COGS calculation for the chart was specific to harvested goods.
       
-      const sortedMonths = Object.keys(monthlyRevenueAndCogs).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+      // Example: If you want to keep the monthly chart based on sales (without detailed COGS from new function yet)
+      let salesQuery = db.sales.filter(s => s.is_deleted !== 1);
+      if (startDate) salesQuery = salesQuery.and(s => s.sale_date >= new Date(startDate).toISOString().split('T')[0]);
+      if (endDate) salesQuery = salesQuery.and(s => s.sale_date <= new Date(endDate).toISOString().split('T')[0]);
+      const salesForChart = await salesQuery.toArray();
+      const saleItemsForChart = await db.saleItems.where('sale_id').anyOf(salesForChart.map(s=>s.id)).and(si => si.is_deleted !== 1).toArray();
+      
+      const monthlyRevenue: { [key: string]: { revenue: number } } = {};
+      salesForChart.forEach(sale => {
+        const itemsForSale = saleItemsForChart.filter(si => si.sale_id === sale.id);
+        let currentSaleRevenue = 0;
+        itemsForSale.forEach(item => {
+            let itemRevenue = item.quantity_sold * item.price_per_unit;
+            if (item.discount_type && item.discount_value != null) {
+                if (item.discount_type === 'Amount') itemRevenue -= item.discount_value;
+                else if (item.discount_type === 'Percentage') itemRevenue *= (1 - item.discount_value / 100);
+            }
+            currentSaleRevenue += Math.max(0, itemRevenue);
+        });
+        const month = new Date(sale.sale_date).toLocaleString('default', { month: 'short', year: 'numeric' });
+        if (!monthlyRevenue[month]) monthlyRevenue[month] = { revenue: 0 };
+        monthlyRevenue[month].revenue += currentSaleRevenue;
+      });
+
+      const sortedMonths = Object.keys(monthlyRevenue).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
       const chartData = sortedMonths.map(month => ({
         name: month,
-        revenue: monthlyRevenueAndCogs[month].revenue,
-        costs: monthlyRevenueAndCogs[month].cogs,
-        profit: monthlyRevenueAndCogs[month].revenue - monthlyRevenueAndCogs[month].cogs,
+        revenue: monthlyRevenue[month].revenue,
+        // costs: 0, // COGS for chart would need separate calculation or come from dashboardData if aggregated monthly
+        // profit: monthlyRevenue[month].revenue,
       }));
       setRevenueByMonth(chartData);
+
 
     } catch (err) {
       console.error("Failed to fetch dashboard data:", err);
@@ -260,19 +173,23 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-6">
-          <MetricCard title="Total Revenue" value={`€${totalRevenue.toFixed(2)}`} />
-          <MetricCard title="No. of Sales" value={numberOfSales} />
-          <MetricCard title="Avg. Sale Value" value={`€${averageSaleValue.toFixed(2)}`} />
-          <MetricCard title="Top Customer" value={`${topCustomerName} (€${topCustomerValue.toFixed(2)})`} description="By total sales value" />
+          <MetricCard title="Total Revenue" value={dashboardData ? `€${dashboardData.totalRevenue.toFixed(2)}` : '€0.00'} />
+          <MetricCard title="No. of Sales" value={dashboardData ? dashboardData.numberOfSales : 0} />
+          <MetricCard title="Avg. Sale Value" value={dashboardData ? `€${dashboardData.avgSaleValue.toFixed(2)}` : '€0.00'} />
+          <MetricCard
+            title="Top Customer"
+            value={dashboardData?.topCustomer ? `${dashboardData.topCustomer.name} (€${dashboardData.topCustomer.totalValue.toFixed(2)})` : 'N/A (€0.00)'}
+            description="By total sales value"
+          />
         </div>
         
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-2 mb-6">
-          <MetricCard title="COGS (Sold Items)" value={`€${calculatedCogs.toFixed(2)}`} description="Input costs for sold products" />
-          <MetricCard title="Gross Profit" value={`€${(totalRevenue - calculatedCogs).toFixed(2)}`} description="Revenue - COGS for Sold Items" />
+          <MetricCard title="COGS (Sold Items)" value={dashboardData ? `€${dashboardData.totalCOGS.toFixed(2)}` : '€0.00'} description="Input costs for sold products" />
+          <MetricCard title="Gross Profit" value={dashboardData ? `€${dashboardData.grossProfit.toFixed(2)}` : '€0.00'} description="Revenue - COGS for Sold Items" />
         </div>
 
         <div className="mt-8 bg-white shadow rounded-lg p-4 sm:p-6">
-          <h2 className="text-lg font-medium leading-6 text-gray-900 mb-4">Monthly Trends (Revenue & Est. COGS)</h2>
+          <h2 className="text-lg font-medium leading-6 text-gray-900 mb-4">Monthly Trends (Revenue)</h2> {/* Adjusted title as COGS for chart is simplified */}
           {revenueByMonth.length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={revenueByMonth} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>

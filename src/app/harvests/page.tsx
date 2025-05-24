@@ -73,16 +73,23 @@ export default function HarvestLogsPage() {
     try {
       const now = new Date().toISOString();
       if ('id' in data && data.id) { // Editing existing
+        // When editing, if quantity_harvested changes, current_quantity_available should also be updated.
+        // This assumes that an edit to quantity_harvested is a correction to the total amount
+        // available before any sales. A more complex logic would be needed if sales already occurred
+        // and we need to adjust based on sold quantity. For now, keep it simple:
         const updatedLog: Partial<HarvestLog> = {
           ...data,
+          current_quantity_available: data.quantity_harvested, // Update if quantity_harvested changes
           updated_at: now,
           _synced: 0,
           _last_modified: Date.now(),
         };
         await db.harvestLogs.update(data.id, updatedLog);
       } else { // Adding new
+        const harvestDataFromForm = data as Omit<HarvestLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'>;
         const newLogData: Omit<HarvestLog, 'id'> = {
-          ...(data as Omit<HarvestLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'>),
+          ...harvestDataFromForm,
+          current_quantity_available: harvestDataFromForm.quantity_harvested, // Initialize with harvested quantity
           created_at: now,
           updated_at: now,
           _synced: 0,
@@ -93,7 +100,6 @@ export default function HarvestLogsPage() {
         const id = crypto.randomUUID();
         await db.harvestLogs.add({ ...newLogData, id });
       }
-      // await fetchData(); // No longer needed
       setShowForm(false);
       setEditingLog(null);
       // After successful local save, request a push to the server

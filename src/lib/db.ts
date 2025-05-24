@@ -104,9 +104,10 @@ export interface CultivationLog {
 
 export interface HarvestLog {
   id: string; // UUID
-  planting_log_id: string; 
-  harvest_date: string; 
+  planting_log_id: string;
+  harvest_date: string;
   quantity_harvested: number;
+  current_quantity_available?: number; // Added to track remaining stock from this harvest
   quantity_unit: string;
   quality_grade?: string;
   notes?: string;
@@ -152,10 +153,11 @@ export interface Sale {
 
 export interface SaleItem {
   id: string; // UUID
-  sale_id: string; 
-  harvest_log_id?: string; 
+  sale_id: string;
+  harvest_log_id?: string; // For items sold from own harvest
+  input_inventory_id?: string; // For items sold directly from purchased inventory
   quantity_sold: number;
-  price_per_unit: number; 
+  price_per_unit: number;
   discount_type?: 'Amount' | 'Percentage' | null;
   discount_value?: number | null;
   notes?: string;
