@@ -57,7 +57,9 @@ const TABLES_TO_SYNC = [
   // Parents / Independent
   { name: 'crops', dbTable: db.crops },
   { name: 'customers', dbTable: db.customers },
-  { name: 'suppliers', dbTable: db.suppliers }, // Added suppliers
+  { name: 'suppliers', dbTable: db.suppliers },
+  { name: 'supplier_invoices', dbTable: db.supplierInvoices }, // Added Supplier Invoices
+  { name: 'supplier_invoice_items', dbTable: db.supplierInvoiceItems }, // Added Supplier Invoice Items
   { name: 'trees', dbTable: db.trees },
   { name: 'input_inventory', dbTable: db.inputInventory },
   
@@ -88,7 +90,12 @@ const TABLES_TO_SYNC = [
 async function getUnsyncedItems<T extends { id: string; _synced?: number; _last_modified?: number; is_deleted?: number }>(
   table: Dexie.Table<T, string>
 ): Promise<T[]> {
-  // Fetches all items marked for sync, including those marked for deletion
+  if (table.name === 'supplierInvoices' || table.name === 'supplierInvoiceItems') {
+    console.log(`[getUnsyncedItems] Querying table ${table.name} for _synced === 0`);
+    const items = await table.where('_synced').equals(0).toArray();
+    console.log(`[getUnsyncedItems] Found ${items.length} items in ${table.name} with _synced === 0`);
+    return items;
+  }
   return table.where('_synced').equals(0).toArray();
 }
 
@@ -114,7 +121,12 @@ async function pushChangesToSupabase() {
     const unsynced = await getUnsyncedItems(table);
 
     if (unsynced.length > 0) {
-      console.log(`Found ${unsynced.length} unsynced items in ${name}`);
+      // Use correct Supabase table names for logging conditions
+      if (name === 'supplier_invoices' || name === 'supplier_invoice_items') {
+        console.log(`[SyncPush] Found ${unsynced.length} unsynced items in ${name}:`, JSON.stringify(unsynced.map(i => i.id)));
+      } else {
+        console.log(`Found ${unsynced.length} unsynced items in ${name}`);
+      }
     }
 
     for (const item of unsynced) {
@@ -213,20 +225,36 @@ async function pushChangesToSupabase() {
             `Authenticated:`, !!currentUser,
             `Session valid until:`, session?.expires_at ? new Date(session.expires_at * 1000) : 'No session/expiry'
           );
+          
+          // Use correct Supabase table names for logging conditions
+          if (name === 'supplier_invoices' || name === 'supplier_invoice_items') {
+            console.log(`[SyncPush] Attempting to upsert to ${name}:`, JSON.stringify(itemToPush));
+          }
 
           const { error: upsertError } = await supabase.from(name).upsert(itemToPush, { onConflict: 'id' });
           
           if (upsertError) {
+            if (name === 'supplier_invoices' || name === 'supplier_invoice_items') {
+              console.error(`[SyncPush] Supabase upsert ERROR for ${name} item ${itemToPush.id}:`, JSON.stringify(upsertError));
+            }
             throw upsertError;
           }
           
           // Mark as synced in Dexie
           await table.update(currentItem.id, { _synced: 1 });
           changesPushed++;
-          console.log(`Successfully synced (upserted) item ${currentItem.id} from ${name}`);
+          if (name === 'supplier_invoices' || name === 'supplier_invoice_items') {
+            console.log(`[SyncPush] Successfully synced (upserted) item ${currentItem.id} from ${name}`);
+          } else {
+            console.log(`Successfully synced (upserted) item ${currentItem.id} from ${name}`);
+          }
         }
       } catch (error: unknown) {
-        console.error(`Failed to sync item ${item.id} from ${name}. Raw error object:`, error);
+        if (name === 'supplier_invoices' || name === 'supplier_invoice_items') {
+          console.error(`[SyncPush] GENERAL ERROR for ${name} item ${item.id}:`, error);
+        } else {
+          console.error(`Failed to sync item ${item.id} from ${name}. Raw error object:`, error);
+        }
         
         let userMessage = `Failed to sync item ${item.id} in table ${name}.`;
         let errorCode: string | undefined;
