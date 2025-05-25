@@ -12,7 +12,8 @@ const navItems = [
   { href: '/inventory', label: 'Inventory Summary' }, // Clarified label
   { href: '/inventory/seed-batches', label: 'Seed Batches' },
   { href: '/inventory/inputs', label: 'Input Items' },
-  { href: '/inventory/supplier-invoices', label: 'Supplier Invoices' }, // New Link
+  { href: '/inventory/purchased-seedlings', label: 'Purchased Seedlings' }, // New Link
+  { href: '/inventory/supplier-invoices', label: 'Supplier Invoices' },
   { href: '/cultivation', label: 'Cultivation' },
   { href: '/harvests', label: 'Harvests' },
   { href: '/sales', label: 'Sales' },

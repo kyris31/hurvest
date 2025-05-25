@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { PlantingLog, SeedBatch, Crop, SeedlingProductionLog, InputInventory, db } from '@/lib/db';
+import { PlantingLog, SeedBatch, Crop, SeedlingProductionLog, InputInventory, PurchasedSeedling, db } from '@/lib/db'; // Added PurchasedSeedling
 
 interface PlantingLogFormProps {
   initialData?: PlantingLog | null;
@@ -11,10 +11,10 @@ interface PlantingLogFormProps {
 }
 
 export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSubmitting }: PlantingLogFormProps) {
-  const [plantingSourceType, setPlantingSourceType] = useState<'seedBatch' | 'seedlingLog' | 'inputInventory'>('seedBatch');
+  const [plantingSourceType, setPlantingSourceType] = useState<'seedBatch' | 'seedlingLog' | 'purchasedSeedling'>('seedBatch'); // Changed 'inputInventory' to 'purchasedSeedling'
   const [seedBatchId, setSeedBatchId] = useState<string | undefined>(undefined);
   const [seedlingProductionLogId, setSeedlingProductionLogId] = useState<string | undefined>(undefined);
-  const [inputInventoryId, setInputInventoryId] = useState<string | undefined>(undefined); // New state
+  const [purchasedSeedlingId, setPurchasedSeedlingId] = useState<string | undefined>(undefined); // New state for purchasedSeedlingId
   const [plantingDate, setPlantingDate] = useState('');
   const [locationDescription, setLocationDescription] = useState('');
   const [plotAffected, setPlotAffected] = useState('');
@@ -25,19 +25,19 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
   
   const [availableSeedBatches, setAvailableSeedBatches] = useState<(SeedBatch & { cropDetails?: Crop })[]>([]);
   const [availableSeedlingLogs, setAvailableSeedlingLogs] = useState<(SeedlingProductionLog & { cropName?: string })[]>([]);
-  const [availableInputInventorySeedlings, setAvailableInputInventorySeedlings] = useState<(InputInventory & { cropName?: string })[]>([]); // New state
+  const [availablePurchasedSeedlings, setAvailablePurchasedSeedlings] = useState<(PurchasedSeedling & { cropDetails?: Crop })[]>([]); // New state
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchFormData = async () => {
       try {
-        const [batchesData, cropsData, seedlingLogsData, inputInventoryData] = await Promise.all([
+        const [batchesData, cropsData, seedlingLogsData, purchasedSeedlingsData] = await Promise.all([
           db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
           db.crops.filter(c => c.is_deleted !== 1).toArray(),
           db.seedlingProductionLogs.where('is_deleted').notEqual(1)
             .and(sl => (sl.current_seedlings_available || 0) > 0)
             .toArray(),
-          db.inputInventory.filter(ii => ii.is_deleted !== 1 && (ii.type === 'Seedling' || ii.type === 'Seedlings' || ii.type === 'Plant Start' || ii.crop_id != null)).toArray(), // Filter for seedling-like items
+          db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1 && ps.current_quantity > 0).toArray(), // Fetch purchased seedlings
         ]);
         
         const cropsMap = new Map(cropsData.map(crop => [crop.id, crop]));
@@ -54,13 +54,11 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         });
         setAvailableSeedlingLogs(enrichedSeedlingLogs);
 
-        const enrichedInputInventorySeedlings = inputInventoryData
-          .filter(ii => ii.current_quantity && ii.current_quantity > 0) // Only show if available
-          .map(ii => {
-            const crop = ii.crop_id ? cropsMap.get(ii.crop_id) : undefined;
-            return { ...ii, cropName: crop?.name || 'N/A (Check Item)' };
-          });
-        setAvailableInputInventorySeedlings(enrichedInputInventorySeedlings);
+        const enrichedPurchasedSeedlings = purchasedSeedlingsData.map(ps => {
+            const crop = ps.crop_id ? cropsMap.get(ps.crop_id) : undefined;
+            return { ...ps, cropDetails: crop };
+        });
+        setAvailablePurchasedSeedlings(enrichedPurchasedSeedlings);
 
       } catch (error) {
         console.error("Failed to fetch form data for planting logs", error);
@@ -70,21 +68,26 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
     fetchFormData();
 
     if (initialData) {
-      if (initialData.input_inventory_id) {
-        setPlantingSourceType('inputInventory');
-        setInputInventoryId(initialData.input_inventory_id);
+      if (initialData.purchased_seedling_id) {
+        setPlantingSourceType('purchasedSeedling');
+        setPurchasedSeedlingId(initialData.purchased_seedling_id);
         setSeedBatchId(undefined);
         setSeedlingProductionLogId(undefined);
       } else if (initialData.seedling_production_log_id) {
         setPlantingSourceType('seedlingLog');
         setSeedlingProductionLogId(initialData.seedling_production_log_id);
         setSeedBatchId(undefined);
-        setInputInventoryId(undefined);
-      } else {
+        setPurchasedSeedlingId(undefined);
+      } else if (initialData.seed_batch_id) { // Default to seedBatch if others are not set
         setPlantingSourceType('seedBatch');
         setSeedBatchId(initialData.seed_batch_id);
         setSeedlingProductionLogId(undefined);
-        setInputInventoryId(undefined);
+        setPurchasedSeedlingId(undefined);
+      } else { // Fallback if no source ID is present in initialData (should ideally not happen)
+        setPlantingSourceType('seedBatch'); // Or your preferred default
+        setSeedBatchId(undefined);
+        setSeedlingProductionLogId(undefined);
+        setPurchasedSeedlingId(undefined);
       }
       setPlantingDate(initialData.planting_date ? initialData.planting_date.split('T')[0] : '');
       setLocationDescription(initialData.location_description || '');
@@ -98,7 +101,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
       setPlantingSourceType('seedBatch');
       setSeedBatchId(undefined);
       setSeedlingProductionLogId(undefined);
-      setInputInventoryId(undefined);
+      setPurchasedSeedlingId(undefined);
       setPlantingDate('');
       setLocationDescription('');
       setPlotAffected('');
@@ -136,7 +139,8 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
       finalLogData = {
         seed_batch_id: seedBatchId,
         seedling_production_log_id: undefined,
-        input_inventory_id: undefined,
+        input_inventory_id: undefined, // Keep if direct input items can be planted
+        purchased_seedling_id: undefined,
         planting_date: plantingDate,
         location_description: locationDescription.trim() || undefined,
         plot_affected: plotAffected.trim() || undefined,
@@ -160,6 +164,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         seed_batch_id: undefined,
         seedling_production_log_id: seedlingProductionLogId,
         input_inventory_id: undefined,
+        purchased_seedling_id: undefined,
         planting_date: plantingDate,
         location_description: locationDescription.trim() || undefined,
         plot_affected: plotAffected.trim() || undefined,
@@ -172,28 +177,29 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         const newAvailableSeedlings = (selectedSeedlingLog.current_seedlings_available || 0) - Number(quantityPlanted);
         stockUpdatePromise = db.seedlingProductionLogs.update(seedlingProductionLogId, { current_seedlings_available: newAvailableSeedlings, _synced: 0, _last_modified: currentTimestamp });
       }
-    } else if (plantingSourceType === 'inputInventory') {
-      if (!inputInventoryId) { setFormError('Please select a Purchased Seedling from Inventory.'); return; }
-      const selectedInventoryItem = availableInputInventorySeedlings.find(ii => ii.id === inputInventoryId);
-      if (!selectedInventoryItem) { setFormError('Selected inventory item not found.'); return; }
-      if (Number(quantityPlanted) > (selectedInventoryItem.current_quantity || 0)) {
-        setFormError(`Not enough in inventory. Available: ${selectedInventoryItem.current_quantity || 0} ${selectedInventoryItem.quantity_unit || 'items'}.`); return;
+    } else if (plantingSourceType === 'purchasedSeedling') {
+      if (!purchasedSeedlingId) { setFormError('Please select a Purchased Seedling batch.'); return; }
+      const selectedPurchasedSeedling = availablePurchasedSeedlings.find(ps => ps.id === purchasedSeedlingId);
+      if (!selectedPurchasedSeedling) { setFormError('Selected purchased seedling batch not found.'); return; }
+      if (Number(quantityPlanted) > (selectedPurchasedSeedling.current_quantity || 0)) {
+        setFormError(`Not enough purchased seedlings available. Available: ${selectedPurchasedSeedling.current_quantity || 0} ${selectedPurchasedSeedling.quantity_unit || 'items'}.`); return;
       }
       finalLogData = {
         seed_batch_id: undefined,
         seedling_production_log_id: undefined,
-        input_inventory_id: inputInventoryId,
+        input_inventory_id: undefined, // Clear this if using purchased_seedling_id
+        purchased_seedling_id: purchasedSeedlingId,
         planting_date: plantingDate,
         location_description: locationDescription.trim() || undefined,
         plot_affected: plotAffected.trim() || undefined,
         quantity_planted: Number(quantityPlanted),
-        quantity_unit: quantityUnit.trim() || selectedInventoryItem.quantity_unit || 'seedlings',
+        quantity_unit: quantityUnit.trim() || selectedPurchasedSeedling.quantity_unit || 'seedlings',
         expected_harvest_date: expectedHarvestDate || undefined,
         notes: notes.trim() || undefined,
       };
       if (!initialData) {
-        const newInventoryQty = (selectedInventoryItem.current_quantity || 0) - Number(quantityPlanted);
-        stockUpdatePromise = db.inputInventory.update(inputInventoryId, { current_quantity: newInventoryQty, _synced: 0, _last_modified: currentTimestamp });
+        const newPurchasedQty = (selectedPurchasedSeedling.current_quantity || 0) - Number(quantityPlanted);
+        stockUpdatePromise = db.purchasedSeedlings.update(purchasedSeedlingId, { current_quantity: newPurchasedQty, _synced: 0, _last_modified: currentTimestamp });
       }
     } else {
       setFormError("Invalid planting source type selected."); return;
@@ -231,31 +237,31 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
                 <input
                   type="radio" name="plantingSourceType" value="seedBatch"
                   checked={plantingSourceType === 'seedBatch'}
-                  onChange={() => { setPlantingSourceType('seedBatch'); setSeedlingProductionLogId(undefined); setInputInventoryId(undefined); setQuantityUnit(''); }}
+                  onChange={() => { setPlantingSourceType('seedBatch'); setSeedlingProductionLogId(undefined); setPurchasedSeedlingId(undefined); setQuantityUnit(''); }}
                   className="form-radio h-4 w-4 text-green-600"
-                  disabled={isSubmitting || (!!initialData && (!!initialData.seedling_production_log_id || !!initialData.input_inventory_id))}
+                  disabled={isSubmitting || (!!initialData && (!!initialData.seedling_production_log_id || !!initialData.purchased_seedling_id))}
                 />
-                <span className="ml-2 text-sm text-gray-700">Direct Sow</span>
+                <span className="ml-2 text-sm text-gray-700">Direct Sow (from Seed Batch)</span>
               </label>
               <label className="inline-flex items-center">
                 <input
                   type="radio" name="plantingSourceType" value="seedlingLog"
                   checked={plantingSourceType === 'seedlingLog'}
-                  onChange={() => { setPlantingSourceType('seedlingLog'); setSeedBatchId(undefined); setInputInventoryId(undefined); setQuantityUnit('seedlings'); }}
+                  onChange={() => { setPlantingSourceType('seedlingLog'); setSeedBatchId(undefined); setPurchasedSeedlingId(undefined); setQuantityUnit('seedlings'); }}
                   className="form-radio h-4 w-4 text-green-600"
-                  disabled={isSubmitting || (!!initialData && (!!initialData.seed_batch_id || !!initialData.input_inventory_id))}
+                  disabled={isSubmitting || (!!initialData && (!!initialData.seed_batch_id || !!initialData.purchased_seedling_id))}
                 />
                 <span className="ml-2 text-sm text-gray-700">Transplant (Self-Produced)</span>
               </label>
               <label className="inline-flex items-center">
                 <input
-                  type="radio" name="plantingSourceType" value="inputInventory"
-                  checked={plantingSourceType === 'inputInventory'}
-                  onChange={() => { setPlantingSourceType('inputInventory'); setSeedBatchId(undefined); setSeedlingProductionLogId(undefined); setQuantityUnit('seedlings'); }}
+                  type="radio" name="plantingSourceType" value="purchasedSeedling"
+                  checked={plantingSourceType === 'purchasedSeedling'}
+                  onChange={() => { setPlantingSourceType('purchasedSeedling'); setSeedBatchId(undefined); setSeedlingProductionLogId(undefined); setQuantityUnit('seedlings'); }}
                   className="form-radio h-4 w-4 text-green-600"
                   disabled={isSubmitting || (!!initialData && (!!initialData.seed_batch_id || !!initialData.seedling_production_log_id))}
                 />
-                <span className="ml-2 text-sm text-gray-700">Transplant (Purchased)</span>
+                <span className="ml-2 text-sm text-gray-700">Transplant (Purchased Batch)</span>
               </label>
             </div>
           </div>
@@ -307,26 +313,29 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
             </div>
           )}
 
-          {plantingSourceType === 'inputInventory' && (
+          {plantingSourceType === 'purchasedSeedling' && (
             <div>
-              <label htmlFor="inputInventoryId" className="block text-sm font-medium text-gray-700">Purchased Seedling Batch (from Inventory)</label>
+              <label htmlFor="purchasedSeedlingId" className="block text-sm font-medium text-gray-700">Purchased Seedling Batch</label>
               <select
-                id="inputInventoryId" value={inputInventoryId || ''}
+                id="purchasedSeedlingId" value={purchasedSeedlingId || ''}
                 onChange={(e) => {
-                  setInputInventoryId(e.target.value || undefined);
-                  const selected = availableInputInventorySeedlings.find(ii => ii.id === e.target.value);
+                  setPurchasedSeedlingId(e.target.value || undefined);
+                  const selected = availablePurchasedSeedlings.find(ps => ps.id === e.target.value);
                   setQuantityUnit(selected?.quantity_unit || 'seedlings');
                 }}
                 className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
                 disabled={isSubmitting || !!initialData}
-                required={plantingSourceType === 'inputInventory'}
+                required={plantingSourceType === 'purchasedSeedling'}
               >
-                <option value="">Select Purchased Seedlings</option>
-                {availableInputInventorySeedlings.map(item => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} ({item.cropName}) - Avail: {item.current_quantity} {item.quantity_unit || ''}
-                  </option>
-                ))}
+                <option value="">Select Purchased Seedling Batch</option>
+                {availablePurchasedSeedlings.map(item => {
+                  const cropDisplay = item.cropDetails ? `${item.cropDetails.name}${item.cropDetails.variety ? ` - ${item.cropDetails.variety}` : ''}` : 'N/A';
+                  return (
+                    <option key={item.id} value={item.id}>
+                      {item.name} ({cropDisplay}) - Avail: {item.current_quantity} {item.quantity_unit || ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}

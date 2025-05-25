@@ -1,36 +1,65 @@
 'use client';
 
 import React from 'react';
-import { PlantingLog, SeedBatch, Crop } from '@/lib/db';
+import { PlantingLog, SeedBatch, Crop, InputInventory, PurchasedSeedling } from '@/lib/db'; // Added PurchasedSeedling
 
 interface PlantingLogListProps {
   plantingLogs: PlantingLog[];
   seedBatches: SeedBatch[];
   crops: Crop[];
+  inputInventory: InputInventory[];
+  purchasedSeedlings: PurchasedSeedling[]; // Added purchasedSeedlings prop
   onEdit: (log: PlantingLog) => void;
   onDelete: (id: string) => Promise<void>;
-  isDeleting: string | null; 
+  isDeleting: string | null;
 }
 
-export default function PlantingLogList({ plantingLogs, seedBatches, crops, onEdit, onDelete, isDeleting }: PlantingLogListProps) {
+export default function PlantingLogList({
+  plantingLogs,
+  seedBatches,
+  crops,
+  inputInventory,
+  purchasedSeedlings, // Destructure new prop
+  onEdit,
+  onDelete,
+  isDeleting
+}: PlantingLogListProps) {
 
-  const getCropDetails = (seedBatchId?: string) => {
-    if (!seedBatchId) return { cropName: <span className="text-gray-400">N/A</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-    // Ensure seedBatches and crops lists are filtered for active items if not guaranteed by parent
-    // This filtering might be redundant if props are already filtered, but safe.
-    const activeSeedBatches = seedBatches.filter(sb => sb.is_deleted !== 1);
+  const getCropDetails = (log: PlantingLog) => {
     const activeCrops = crops.filter(c => c.is_deleted !== 1);
 
-    const batch = activeSeedBatches.find(b => b.id === seedBatchId);
-    if (!batch) return { cropName: <span className="text-red-500">Unknown Batch</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+    if (log.purchased_seedling_id) {
+      const purchasedSeedling = purchasedSeedlings.find(ps => ps.id === log.purchased_seedling_id && ps.is_deleted !== 1);
+      if (purchasedSeedling?.crop_id) {
+        const crop = activeCrops.find(c => c.id === purchasedSeedling.crop_id);
+        if (crop) return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
+        return { cropName: <span className="text-red-500">Crop for Purchased Seedling Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+      }
+      // If purchased seedling has no crop_id, use its name.
+      return { cropName: purchasedSeedling?.name || <span className="text-red-500">Unknown Purchased Seedling</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+    } else if (log.seed_batch_id) {
+      const batch = seedBatches.find(b => b.id === log.seed_batch_id && b.is_deleted !== 1);
+      if (!batch) return { cropName: <span className="text-red-500">Unknown Seed Batch</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+      const crop = activeCrops.find(c => c.id === batch.crop_id);
+      if (!crop) return { cropName: <span className="text-red-500">Crop for Seed Batch Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+      return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
+    } else if (log.input_inventory_id) { // Fallback for older direct input inventory plantings (if any)
+      const invItem = inputInventory.find(ii => ii.id === log.input_inventory_id && ii.is_deleted !== 1);
+      if (!invItem) return { cropName: <span className="text-red-500">Unknown Inventory Item</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+      if (invItem.crop_id) {
+        const crop = activeCrops.find(c => c.id === invItem.crop_id);
+        if (!crop) return { cropName: <span className="text-red-500">Crop for Inventory Item Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+        return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
+      }
+      return { cropName: invItem.name, cropVariety: <span className="text-gray-400">N/A</span> };
+    } else if (log.seedling_production_log_id) {
+      // This case needs access to seedlingProductionLogs, which are not currently passed as a prop.
+      // For now, it will likely fall through or need seedlingProductionLogs to be passed.
+      // Or, seedling_production_log should always also have a seed_batch_id or crop_id.
+      return { cropName: <span className="text-orange-500">From Seedling Prod. (Details N/A)</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+    }
     
-    const crop = activeCrops.find(c => c.id === batch.crop_id);
-    if (!crop) return { cropName: <span className="text-red-500">Unknown Crop</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-    
-    return {
-        cropName: crop.name,
-        cropVariety: crop.variety || <span className="text-gray-400">N/A</span>
-    };
+    return { cropName: <span className="text-gray-400">N/A</span>, cropVariety: <span className="text-gray-400">N/A</span> };
   };
 
   const activePlantingLogs = plantingLogs.filter(log => log.is_deleted !== 1);
@@ -57,7 +86,7 @@ export default function PlantingLogList({ plantingLogs, seedBatches, crops, onEd
         </thead>
         <tbody className="text-gray-700">
           {activePlantingLogs.map((log) => {
-            const { cropName, cropVariety } = getCropDetails(log.seed_batch_id);
+            const { cropName, cropVariety } = getCropDetails(log); // Pass the whole log object
             return (
               <tr key={log.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
                 <td className="py-3 px-5">{new Date(log.planting_date).toLocaleDateString()}</td>

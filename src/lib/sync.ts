@@ -62,6 +62,7 @@ const TABLES_TO_SYNC = [
   { name: 'supplier_invoice_items', dbTable: db.supplierInvoiceItems }, // Added Supplier Invoice Items
   { name: 'trees', dbTable: db.trees },
   { name: 'input_inventory', dbTable: db.inputInventory },
+  { name: 'purchased_seedlings', dbTable: db.purchasedSeedlings }, // Added Purchased Seedlings
   
   // Poultry Module
   { name: 'flocks', dbTable: db.flocks },
@@ -174,16 +175,30 @@ async function pushChangesToSupabase() {
         } else {
           // Handle upsert for non-deleted items
           // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { _synced, _last_modified, is_deleted, deleted_at, ...itemToPushAny } = currentItem;
+          const { _synced, _last_modified, is_deleted, deleted_at, costPerUnit, supplierName, ...itemToPushAny } = currentItem as any; // Cast to any to handle dynamic fields
           // itemToPush needs to be mutable for deletions of properties
           let itemToPush: Record<string, any> = { ...itemToPushAny };
 
-          // Data cleaning specific to tables before pushing
           if (name === 'input_inventory') {
-            if ('cost_per_unit' in itemToPush) {
-              delete itemToPush.cost_per_unit;
+            // Ensure the key sent to Supabase is snake_case if the DB column is cost_per_unit
+            // and the JS object had costPerUnit (camelCase)
+            if (costPerUnit !== undefined) {
+              itemToPush.cost_per_unit = costPerUnit;
             }
+            // supplierName is a client-side enriched field, not a DB column. It should be removed before syncing.
+            // The actual database column is supplier_id.
+            // The 'supplierName' property was destructured out by the '...itemToPushAny' spread, so it's not in itemToPush.
+            // If it were still there, we would do: delete itemToPush.supplierName;
+            // No action needed here for supplierName due to destructuring, but good to be aware.
           }
+          // Data cleaning specific to tables before pushing
+          // if (name === 'input_inventory') {
+          //   // This was added before cost_per_unit was a column in Supabase.
+          //   // Now that it is, we should send it.
+          //   if ('cost_per_unit' in itemToPush) {
+          //     delete itemToPush.cost_per_unit;
+          //   }
+          // }
           
           if (name === 'sale_items') {
             const saleItemToPush = itemToPush as Partial<SaleItem>;
@@ -230,6 +245,10 @@ async function pushChangesToSupabase() {
           if (name === 'supplier_invoices' || name === 'supplier_invoice_items') {
             console.log(`[SyncPush] Attempting to upsert to ${name}:`, JSON.stringify(itemToPush));
           }
+          if (name === 'input_inventory') {
+            console.log(`[SyncPush] Keys for input_inventory item ${itemToPush.id} before upsert:`, Object.keys(itemToPush));
+            console.log(`[SyncPush] Full item for input_inventory item ${itemToPush.id} before upsert:`, JSON.stringify(itemToPush));
+          }
 
           const { error: upsertError } = await supabase.from(name).upsert(itemToPush, { onConflict: 'id' });
           
@@ -250,10 +269,21 @@ async function pushChangesToSupabase() {
           }
         }
       } catch (error: unknown) {
-        if (name === 'supplier_invoices' || name === 'supplier_invoice_items') {
-          console.error(`[SyncPush] GENERAL ERROR for ${name} item ${item.id}:`, error);
-        } else {
-          console.error(`Failed to sync item ${item.id} from ${name}. Raw error object:`, error);
+        // Log the raw error object regardless of table, but provide more details if available
+        console.error(`[SyncPush] Error during sync operation for item ${item.id} in ${name}. Raw error:`, error);
+
+        // Attempt to get more details if it's a Supabase-like error from the upsert
+        // The 'error' object here is what was thrown, which should be 'upsertError' if that failed.
+        if (typeof error === 'object' && error !== null) {
+            const supabaseError = error as { code?: string, message?: string, details?: string, hint?: string, [key: string]: any };
+            console.error(
+                `[SyncPush] Detailed Supabase error for ${name} item ${item.id}:`,
+                `Message: ${supabaseError.message || 'N/A'}`,
+                `Details: ${supabaseError.details || 'N/A'}`,
+                `Hint: ${supabaseError.hint || 'N/A'}`,
+                `Code: ${supabaseError.code || 'N/A'}`,
+                `Full Error: ${JSON.stringify(supabaseError)}`
+            );
         }
         
         let userMessage = `Failed to sync item ${item.id} in table ${name}.`;

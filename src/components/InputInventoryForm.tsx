@@ -97,6 +97,15 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
     }
 
     const numQuantityPurchased = quantityPurchased === '' ? undefined : Number(quantityPurchased);
+    const numTotalPurchaseCost = totalPurchaseCost === '' ? undefined : Number(totalPurchaseCost);
+    
+    let calculatedCostPerUnit: number | undefined = undefined;
+    // Determine initial quantity for cost_per_unit calculation
+    const relevantInitialQuantity = initialData?.initial_quantity ?? numQuantityPurchased;
+
+    if (numTotalPurchaseCost !== undefined && relevantInitialQuantity !== undefined && relevantInitialQuantity > 0) {
+      calculatedCostPerUnit = numTotalPurchaseCost / relevantInitialQuantity;
+    }
 
     const inventoryData = {
       name: name.trim(),
@@ -107,12 +116,18 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
       initial_quantity: initialData ? initialData.initial_quantity : numQuantityPurchased, // Keep initial if editing
       current_quantity: initialData ? initialData.current_quantity : numQuantityPurchased,
       quantity_unit: quantityUnit.trim() || undefined,
-      total_purchase_cost: totalPurchaseCost === '' ? undefined : Number(totalPurchaseCost),
+      total_purchase_cost: numTotalPurchaseCost,
+      cost_per_unit: calculatedCostPerUnit, // Add calculated cost_per_unit
       minimum_stock_level: minimumStockLevel === '' ? undefined : Number(minimumStockLevel),
       notes: notes.trim() || undefined,
     };
     
     if (initialData?.id) {
+      // When editing, we generally don't re-calculate cost_per_unit unless total_purchase_cost or initial_quantity are also editable.
+      // The form currently disables these for existing items.
+      // So, we pass the existing cost_per_unit or the newly calculated one if those fields were somehow changed.
+      // However, to be safe and consistent with disabled fields, let's preserve existing cost_per_unit.
+      // If total_purchase_cost and initial_quantity become editable, this logic should be revisited.
       const dataToSubmit: InputInventory = {
         ...initialData,
         name: inventoryData.name,
@@ -120,25 +135,27 @@ export default function InputInventoryForm({ initialData, onSubmit, onCancel, is
         crop_id: inventoryData.crop_id,
         supplier_id: inventoryData.supplier_id,
         purchase_date: inventoryData.purchase_date,
-        // initial_quantity, current_quantity, total_purchase_cost are not typically edited directly here for existing items
-        // They are set on creation or current_quantity is adjusted by usage.
-        // If you want to allow editing these, the form logic needs to be more specific.
-        // For now, we preserve them from initialData if editing.
-        initial_quantity: initialData.initial_quantity, 
-        current_quantity: initialData.current_quantity, // This should be updated by usage, not directly here unless it's a stock adjustment form
         quantity_unit: inventoryData.quantity_unit,
-        total_purchase_cost: initialData.total_purchase_cost,
         minimum_stock_level: inventoryData.minimum_stock_level,
         notes: inventoryData.notes,
+        // cost_per_unit should ideally be preserved if total_purchase_cost and initial_quantity are not changed.
+        // If they were editable, we'd use inventoryData.cost_per_unit.
+        // Since they are disabled on edit, we use initialData.cost_per_unit.
+        // If it was never set, and somehow total_purchase_cost/initial_quantity were changed,
+        // then inventoryData.cost_per_unit would be the new one.
+        // For now, let's assume cost_per_unit is set on creation and doesn't change on simple edits
+        // unless the base figures are also changed (which they aren't in current form for edits).
+        cost_per_unit: initialData.cost_per_unit !== undefined ? initialData.cost_per_unit : calculatedCostPerUnit,
       };
       await onSubmit(dataToSubmit);
     } else {
+      // For new items
       const newId = crypto.randomUUID();
       await onSubmit({
-        ...inventoryData,
-        initial_quantity: numQuantityPurchased, // Ensure this is set for new items
-        current_quantity: numQuantityPurchased, // Current is same as initial for new items
-        qr_code_data: newId
+        ...inventoryData, // inventoryData now includes cost_per_unit
+        initial_quantity: numQuantityPurchased,
+        current_quantity: numQuantityPurchased,
+        qr_code_data: newId,
       });
     }
   };

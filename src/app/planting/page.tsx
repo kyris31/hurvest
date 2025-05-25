@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'; // Removed useEffect, useCallback
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, PlantingLog } from '@/lib/db'; // Removed unused SeedBatch, Crop
+import { db, PlantingLog, InputInventory, PurchasedSeedling } from '@/lib/db'; // Added PurchasedSeedling
 import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import PlantingLogList from '@/components/PlantingLogList';
 import PlantingLogForm from '@/components/PlantingLogForm';
@@ -54,7 +54,32 @@ export default function PlantingLogsPage() {
     []
   );
 
-  const isLoading = plantingLogs === undefined || seedBatches === undefined || crops === undefined;
+  const inputInventory = useLiveQuery(
+    async () => {
+      try {
+        // Fetch all non-deleted inventory items. Could filter by type 'seedlings' if needed for performance.
+        return await db.inputInventory.filter(ii => ii.is_deleted === 0).toArray();
+      } catch (err) {
+        console.error("Failed to fetch input inventory for PlantingLogsPage:", err);
+        return [];
+      }
+    },
+    []
+  );
+
+  const purchasedSeedlings = useLiveQuery(
+    async () => {
+      try {
+        return await db.purchasedSeedlings.filter(ps => ps.is_deleted === 0).toArray();
+      } catch (err) {
+        console.error("Failed to fetch purchased seedlings for PlantingLogsPage:", err);
+        return [];
+      }
+    },
+    []
+  );
+
+  const isLoading = plantingLogs === undefined || seedBatches === undefined || crops === undefined || inputInventory === undefined || purchasedSeedlings === undefined;
 
   const handleFormSubmit = async (data: Omit<PlantingLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | PlantingLog) => {
     setIsSubmitting(true);
@@ -230,11 +255,13 @@ export default function PlantingLogsPage() {
       <div className="mt-4">
         {error && <p className="text-red-500 mb-4 p-3 bg-red-100 rounded-md">{error}</p>}
         {isLoading && <p className="text-center text-gray-500">Loading planting logs...</p>}
-        {!isLoading && !error && plantingLogs && seedBatches && crops && (
+        {!isLoading && !error && plantingLogs && seedBatches && crops && inputInventory && purchasedSeedlings && (
           <PlantingLogList
             plantingLogs={plantingLogs}
             seedBatches={seedBatches}
             crops={crops}
+            inputInventory={inputInventory}
+            purchasedSeedlings={purchasedSeedlings} // Pass purchasedSeedlings
             onEdit={handleEdit}
             onDelete={handleDelete}
             isDeleting={isDeleting}

@@ -1662,66 +1662,36 @@ async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promi
     const cropIds = seedlingLogs.map(sl => sl.crop_id);
     const seedlingLogIds = seedlingLogs.map(sl => sl.id);
 
-    // Removed seedBatches from Promise.all as seedBatchCode is no longer directly needed for this report's display
-    const [crops, plantingLogs, harvestLogs, saleItems] = await Promise.all([
-        // db.seedBatches.where('id').anyOf(seedBatchIds).toArray(), // No longer fetching seedBatches here
-        db.crops.where('id').anyOf(cropIds).toArray(),
-        db.plantingLogs.where('seedling_production_log_id').anyOf(seedlingLogIds).and(pl => pl.is_deleted !== 1).toArray(),
+    // Fetch all potentially relevant crops first
+    const allCrops = await db.crops.filter(c => c.is_deleted !== 1).toArray();
+    const cropMap = new Map(allCrops.map(c => [c.id, c]));
+
+    // Fetch all non-deleted planting logs, harvest logs, and sale items
+    const [allPlantingLogs, allHarvestLogs, allSaleItems] = await Promise.all([
+        db.plantingLogs.filter(pl => pl.is_deleted !== 1).toArray(),
         db.harvestLogs.filter(hl => hl.is_deleted !== 1).toArray(),
         db.saleItems.filter(si => si.is_deleted !== 1).toArray()
     ]);
 
-    const cropMap = new Map(crops.map(c => [c.id, c]));
-    // const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb])); // No longer needed
-
-    // --- BEGIN: Add Purchased Seedlings ---
-    let purchasedSeedlingsQuery = db.inputInventory
-        .filter(ii => ii.is_deleted !== 1 && ii.type === 'seedlings');
-
-    if (filters?.startDate) {
-        // Assuming purchase_date should be within the filter range for purchased seedlings
-        purchasedSeedlingsQuery = purchasedSeedlingsQuery.and(ii => !!ii.purchase_date && ii.purchase_date >= filters.startDate!);
-    }
-    if (filters?.endDate) {
-        purchasedSeedlingsQuery = purchasedSeedlingsQuery.and(ii => !!ii.purchase_date && ii.purchase_date <= filters.endDate!);
-    }
-    const purchasedSeedlingsInventory = await purchasedSeedlingsQuery.toArray();
-
-    const purchasedSeedlingCropIds = purchasedSeedlingsInventory
-        .map(ii => ii.crop_id)
-        .filter(id => id) as string[];
-
-    if (purchasedSeedlingCropIds.length > 0) {
-        const distinctPurchasedCropIds = [...new Set(purchasedSeedlingCropIds.filter(id => !cropMap.has(id)))];
-        if (distinctPurchasedCropIds.length > 0) {
-            const purchasedCrops = await db.crops.where('id').anyOf(distinctPurchasedCropIds).toArray();
-            purchasedCrops.forEach(c => cropMap.set(c.id, c));
-        }
-    }
-    // --- END: Add Purchased Seedlings ---
-
     const reportItems: SeedlingLifecycleReportItem[] = [];
 
-    // Process self-produced seedlings
-    for (const sl of seedlingLogs) {
-        // const seedBatch = seedBatchMap.get(sl.seed_batch_id); // No longer needed for batch code
-        const crop = cropMap.get(sl.crop_id);
-        const plantingsFromThisSeedlingLog = plantingLogs.filter(pl => pl.seedling_production_log_id === sl.id);
+    // 1. Process self-produced seedlings (from seedlingProductionLogs)
+    for (const sl of seedlingLogs) { // seedlingLogs is already fetched and filtered by date
+        const crop = sl.crop_id ? cropMap.get(sl.crop_id) : undefined;
+        const plantingsFromThisSeedlingLog = allPlantingLogs.filter(pl => pl.seedling_production_log_id === sl.id);
         const seedlingsTransplanted = plantingsFromThisSeedlingLog.reduce((sum, pl) => sum + (pl.quantity_planted || 0), 0);
         
-        const harvestLogIdsFromThesePlantings = plantingsFromThisSeedlingLog.flatMap(pl => 
-            harvestLogs.filter(hl => hl.planting_log_id === pl.id).map(hl => hl.id)
+        const harvestLogIdsFromThesePlantings = plantingsFromThisSeedlingLog.flatMap(pl =>
+            allHarvestLogs.filter(hl => hl.planting_log_id === pl.id).map(hl => hl.id)
         );
-        const totalHarvestedFromSeedlings = harvestLogs
+        const totalHarvestedFromSeedlings = allHarvestLogs
             .filter(hl => harvestLogIdsFromThesePlantings.includes(hl.id))
             .reduce((sum, hl) => sum + (hl.quantity_harvested || 0), 0);
 
-        const saleItemsForTheseHarvests = saleItems.filter(si => si.harvest_log_id && harvestLogIdsFromThesePlantings.includes(si.harvest_log_id));
+        const saleItemsForTheseHarvests = allSaleItems.filter(si => si.harvest_log_id && harvestLogIdsFromThesePlantings.includes(si.harvest_log_id));
         const totalSoldFromSeedlings = saleItemsForTheseHarvests.reduce((sum, si) => sum + (si.quantity_sold || 0), 0);
 
         reportItems.push({
-            // seedBatchId: sl.seed_batch_id, // Removed
-            // seedBatchCode: seedBatch?.batch_code || 'N/A', // Removed
             cropName: crop?.name || 'N/A',
             sowingDate: new Date(sl.sowing_date).toLocaleDateString(),
             quantitySownDisplay: `${sl.quantity_sown_value} ${sl.sowing_unit_from_batch || 'units'}`,
@@ -1734,24 +1704,42 @@ async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promi
         });
     }
 
-    // Process purchased seedlings
-    for (const ii of purchasedSeedlingsInventory) {
-        const crop = ii.crop_id ? cropMap.get(ii.crop_id) : undefined;
-        // For purchased seedlings, transplanted/harvested/sold tracking would require
-        // planting_logs to reference input_inventory_id.
-        // For now, these are assumed to be 0 or need a different tracking mechanism.
-        // The "currentSeedlingsAvailable" comes from input_inventory.current_quantity.
-        // "seedlingsProduced" is the initial quantity purchased.
+    // 2. Process purchased seedlings (from purchasedSeedlings table)
+    let purchasedSeedlingsQuery = db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1);
+    if (filters?.startDate) {
+        purchasedSeedlingsQuery = purchasedSeedlingsQuery.and(ps => !!ps.purchase_date && ps.purchase_date >= filters.startDate!);
+    }
+    if (filters?.endDate) {
+        purchasedSeedlingsQuery = purchasedSeedlingsQuery.and(ps => !!ps.purchase_date && ps.purchase_date <= filters.endDate!);
+    }
+    const purchasedSeedlingsData = await purchasedSeedlingsQuery.toArray();
+
+    for (const ps of purchasedSeedlingsData) {
+        const crop = ps.crop_id ? cropMap.get(ps.crop_id) : undefined;
+        
+        const plantingsFromThisPurchasedBatch = allPlantingLogs.filter(pl => pl.purchased_seedling_id === ps.id);
+        const seedlingsTransplanted = plantingsFromThisPurchasedBatch.reduce((sum, pl) => sum + (pl.quantity_planted || 0), 0);
+        
+        const harvestLogIdsFromThesePlantings = plantingsFromThisPurchasedBatch.flatMap(pl =>
+            allHarvestLogs.filter(hl => hl.planting_log_id === pl.id).map(hl => hl.id)
+        );
+        const totalHarvestedFromSeedlings = allHarvestLogs
+            .filter(hl => harvestLogIdsFromThesePlantings.includes(hl.id))
+            .reduce((sum, hl) => sum + (hl.quantity_harvested || 0), 0);
+
+        const saleItemsForTheseHarvests = allSaleItems.filter(si => si.harvest_log_id && harvestLogIdsFromThesePlantings.includes(si.harvest_log_id));
+        const totalSoldFromSeedlings = saleItemsForTheseHarvests.reduce((sum, si) => sum + (si.quantity_sold || 0), 0);
+
         reportItems.push({
-            cropName: crop?.name || ii.name, // Use inventory item name if no direct crop link
-            sowingDate: ii.purchase_date ? new Date(ii.purchase_date).toLocaleDateString() : 'N/A',
+            cropName: crop?.name || ps.name,
+            sowingDate: ps.purchase_date ? new Date(ps.purchase_date).toLocaleDateString() : 'N/A',
             quantitySownDisplay: 'Purchased',
-            seedlingsProduced: ii.initial_quantity || 0,
-            seedlingsTransplanted: 0, // Needs linkage via planting_logs using input_inventory_id
-            totalHarvestedFromSeedlings: 0, // Needs linkage
-            totalSoldFromSeedlings: 0, // Needs linkage
-            currentSeedlingsAvailable: ii.current_quantity || 0,
-            notes: ii.notes || ''
+            seedlingsProduced: ps.initial_quantity || 0,
+            seedlingsTransplanted,
+            totalHarvestedFromSeedlings,
+            totalSoldFromSeedlings,
+            currentSeedlingsAvailable: ps.current_quantity || 0,
+            notes: ps.notes || ''
         });
     }
 
