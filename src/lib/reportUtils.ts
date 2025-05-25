@@ -1674,8 +1674,35 @@ async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promi
     const cropMap = new Map(crops.map(c => [c.id, c]));
     // const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb])); // No longer needed
 
+    // --- BEGIN: Add Purchased Seedlings ---
+    let purchasedSeedlingsQuery = db.inputInventory
+        .filter(ii => ii.is_deleted !== 1 && ii.type === 'seedlings');
+
+    if (filters?.startDate) {
+        // Assuming purchase_date should be within the filter range for purchased seedlings
+        purchasedSeedlingsQuery = purchasedSeedlingsQuery.and(ii => !!ii.purchase_date && ii.purchase_date >= filters.startDate!);
+    }
+    if (filters?.endDate) {
+        purchasedSeedlingsQuery = purchasedSeedlingsQuery.and(ii => !!ii.purchase_date && ii.purchase_date <= filters.endDate!);
+    }
+    const purchasedSeedlingsInventory = await purchasedSeedlingsQuery.toArray();
+
+    const purchasedSeedlingCropIds = purchasedSeedlingsInventory
+        .map(ii => ii.crop_id)
+        .filter(id => id) as string[];
+
+    if (purchasedSeedlingCropIds.length > 0) {
+        const distinctPurchasedCropIds = [...new Set(purchasedSeedlingCropIds.filter(id => !cropMap.has(id)))];
+        if (distinctPurchasedCropIds.length > 0) {
+            const purchasedCrops = await db.crops.where('id').anyOf(distinctPurchasedCropIds).toArray();
+            purchasedCrops.forEach(c => cropMap.set(c.id, c));
+        }
+    }
+    // --- END: Add Purchased Seedlings ---
+
     const reportItems: SeedlingLifecycleReportItem[] = [];
 
+    // Process self-produced seedlings
     for (const sl of seedlingLogs) {
         // const seedBatch = seedBatchMap.get(sl.seed_batch_id); // No longer needed for batch code
         const crop = cropMap.get(sl.crop_id);
@@ -1706,7 +1733,37 @@ async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promi
             notes: sl.notes
         });
     }
-    return reportItems.sort((a,b) => new Date(b.sowingDate).getTime() - new Date(a.sowingDate).getTime());
+
+    // Process purchased seedlings
+    for (const ii of purchasedSeedlingsInventory) {
+        const crop = ii.crop_id ? cropMap.get(ii.crop_id) : undefined;
+        // For purchased seedlings, transplanted/harvested/sold tracking would require
+        // planting_logs to reference input_inventory_id.
+        // For now, these are assumed to be 0 or need a different tracking mechanism.
+        // The "currentSeedlingsAvailable" comes from input_inventory.current_quantity.
+        // "seedlingsProduced" is the initial quantity purchased.
+        reportItems.push({
+            cropName: crop?.name || ii.name, // Use inventory item name if no direct crop link
+            sowingDate: ii.purchase_date ? new Date(ii.purchase_date).toLocaleDateString() : 'N/A',
+            quantitySownDisplay: 'Purchased',
+            seedlingsProduced: ii.initial_quantity || 0,
+            seedlingsTransplanted: 0, // Needs linkage via planting_logs using input_inventory_id
+            totalHarvestedFromSeedlings: 0, // Needs linkage
+            totalSoldFromSeedlings: 0, // Needs linkage
+            currentSeedlingsAvailable: ii.current_quantity || 0,
+            notes: ii.notes || ''
+        });
+    }
+
+    return reportItems.sort((a, b) => {
+        const dateA = a.sowingDate !== 'N/A' ? new Date(a.sowingDate).getTime() : 0;
+        const dateB = b.sowingDate !== 'N/A' ? new Date(b.sowingDate).getTime() : 0;
+        if (dateB !== dateA) {
+            return dateB - dateA;
+        }
+        // Fallback sort by crop name if dates are the same or N/A
+        return (a.cropName || '').localeCompare(b.cropName || '');
+    });
 }
 
 export async function exportSeedlingLifecycleToPDF(filters?: DateRangeFilters): Promise<void> {

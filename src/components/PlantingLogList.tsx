@@ -14,16 +14,23 @@ interface PlantingLogListProps {
 
 export default function PlantingLogList({ plantingLogs, seedBatches, crops, onEdit, onDelete, isDeleting }: PlantingLogListProps) {
 
-  const getSeedBatchInfo = (seedBatchId?: string) => {
-    if (!seedBatchId) return <span className="text-gray-400">N/A</span>;
+  const getCropDetails = (seedBatchId?: string) => {
+    if (!seedBatchId) return { cropName: <span className="text-gray-400">N/A</span>, cropVariety: <span className="text-gray-400">N/A</span> };
     // Ensure seedBatches and crops lists are filtered for active items if not guaranteed by parent
+    // This filtering might be redundant if props are already filtered, but safe.
     const activeSeedBatches = seedBatches.filter(sb => sb.is_deleted !== 1);
     const activeCrops = crops.filter(c => c.is_deleted !== 1);
 
     const batch = activeSeedBatches.find(b => b.id === seedBatchId);
-    if (!batch) return 'Unknown/Deleted Batch';
+    if (!batch) return { cropName: <span className="text-red-500">Unknown Batch</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+    
     const crop = activeCrops.find(c => c.id === batch.crop_id);
-    return `${batch.batch_code} (${crop ? crop.name : 'Unknown/Deleted Crop'})`;
+    if (!crop) return { cropName: <span className="text-red-500">Unknown Crop</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+    
+    return {
+        cropName: crop.name,
+        cropVariety: crop.variety || <span className="text-gray-400">N/A</span>
+    };
   };
 
   const activePlantingLogs = plantingLogs.filter(log => log.is_deleted !== 1);
@@ -38,7 +45,8 @@ export default function PlantingLogList({ plantingLogs, seedBatches, crops, onEd
         <thead className="bg-green-600 text-white">
           <tr>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Planting Date</th>
-            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Seed Batch (Crop)</th>
+            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Crop</th>
+            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Variety</th>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Location</th>
             <th className="text-right py-3 px-5 uppercase font-semibold text-sm">Qty Planted</th>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Unit</th>
@@ -48,12 +56,15 @@ export default function PlantingLogList({ plantingLogs, seedBatches, crops, onEd
           </tr>
         </thead>
         <tbody className="text-gray-700">
-          {activePlantingLogs.map((log) => (
-            <tr key={log.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
-              <td className="py-3 px-5">{new Date(log.planting_date).toLocaleDateString()}</td>
-              <td className="py-3 px-5">{getSeedBatchInfo(log.seed_batch_id)}</td>
-              <td className="py-3 px-5">{log.location_description || <span className="text-gray-400">N/A</span>}</td>
-              <td className="py-3 px-5 text-right">{log.quantity_planted}</td>
+          {activePlantingLogs.map((log) => {
+            const { cropName, cropVariety } = getCropDetails(log.seed_batch_id);
+            return (
+              <tr key={log.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
+                <td className="py-3 px-5">{new Date(log.planting_date).toLocaleDateString()}</td>
+                <td className="py-3 px-5">{cropName}</td>
+                <td className="py-3 px-5">{cropVariety}</td>
+                <td className="py-3 px-5">{log.location_description || <span className="text-gray-400">N/A</span>}</td>
+                <td className="py-3 px-5 text-right">{log.quantity_planted}</td>
               <td className="py-3 px-5">{log.quantity_unit || <span className="text-gray-400">N/A</span>}</td>
               <td className="py-3 px-5">{log.expected_harvest_date ? new Date(log.expected_harvest_date).toLocaleDateString() : <span className="text-gray-400">N/A</span>}</td>
               <td className="py-3 px-5 text-center">
@@ -87,8 +98,9 @@ export default function PlantingLogList({ plantingLogs, seedBatches, crops, onEd
                   {isDeleting === log.id ? 'Deleting...' : 'Delete'}
                 </button>
               </td>
-            </tr>
-          ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
