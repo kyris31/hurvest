@@ -11,6 +11,7 @@ interface PlantingLogFormProps {
 }
 
 export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSubmitting }: PlantingLogFormProps) {
+  console.log("[PlantingLogForm] Component rendering/re-rendering. InitialData:", initialData);
   const [plantingSourceType, setPlantingSourceType] = useState<'seedBatch' | 'seedlingLog' | 'purchasedSeedling'>('seedBatch'); // Changed 'inputInventory' to 'purchasedSeedling'
   const [seedBatchId, setSeedBatchId] = useState<string | undefined>(undefined);
   const [seedlingProductionLogId, setSeedlingProductionLogId] = useState<string | undefined>(undefined);
@@ -114,17 +115,21 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    console.log("[PlantingLogForm] handleSubmit triggered");
     setFormError(null);
     if (!plantingDate || quantityPlanted === '' || Number(quantityPlanted) <= 0) {
+      console.error("[PlantingLogForm] Validation failed: Missing planting date or invalid quantity.");
       setFormError('Planting Date and a valid Quantity Planted (>0) are required.');
       return;
     }
     if (isNaN(Number(quantityPlanted))) {
+        console.error("[PlantingLogForm] Validation failed: Quantity planted is not a number.");
         setFormError('Quantity planted must be a valid number.');
         return;
     }
+    console.log("[PlantingLogForm] Basic validation passed. Source type:", plantingSourceType);
 
-    let finalLogData: Omit<PlantingLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'>;
+    let finalLogData: Omit<PlantingLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'>; // Corrected Omit: purchased_seedling_id is a valid field to set
     let stockUpdatePromise: Promise<number> | null = null;
     const currentTimestamp = Date.now();
 

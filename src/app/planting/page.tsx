@@ -235,7 +235,15 @@ export default function PlantingLogsPage() {
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 flex justify-between items-center">
           <h1 className="text-3xl font-bold tracking-tight text-gray-900">Planting Logs</h1>
           <button
-            onClick={() => { setEditingLog(null); setShowForm(true); setError(null); }}
+            onClick={() => {
+              console.log("[PlantingLogsPage] 'Record New Planting' button clicked.");
+              setEditingLog(null);
+              setShowForm(prev => {
+                console.log("[PlantingLogsPage] setShowForm called. Previous value:", prev, "New value: true");
+                return true;
+              });
+              setError(null);
+            }}
             className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded shadow-sm transition-colors duration-150"
           >
             Record New Planting
@@ -244,12 +252,20 @@ export default function PlantingLogsPage() {
       </header>
 
       {showForm && (
-        <PlantingLogForm
-          initialData={editingLog}
-          onSubmit={handleFormSubmit}
-          onCancel={() => { setShowForm(false); setEditingLog(null); setError(null);}}
-          isSubmitting={isSubmitting}
-        />
+        <>
+          {console.log("[PlantingLogsPage] 'showForm' is true, attempting to render PlantingLogForm.")}
+          <PlantingLogForm
+            initialData={editingLog}
+            onSubmit={handleFormSubmit}
+            onCancel={() => {
+              console.log("[PlantingLogsPage] PlantingLogForm onCancel called.");
+              setShowForm(false);
+              setEditingLog(null);
+              setError(null);
+            }}
+            isSubmitting={isSubmitting}
+          />
+        </>
       )}
 
       <div className="mt-4">
