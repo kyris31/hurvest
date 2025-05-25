@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, CropPlanStage, CropPlan, Crop } from '@/lib/db';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation'; // Import useRouter
 import { Calendar, momentLocalizer, EventProps, CalendarProps } from 'react-big-calendar';
 import moment from 'moment';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
@@ -20,6 +21,7 @@ interface CalendarEvent {
 }
 
 export default function PlanningCalendarPage() {
+  const router = useRouter(); // Initialize router
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
