@@ -78,9 +78,11 @@ export interface PlantingLog {
   quantity_unit?: string; 
   expected_harvest_date?: string; 
   notes?: string;
-  created_at?: string; 
-  updated_at?: string; 
-  _synced?: number; 
+  status?: string; // 'active', 'completed', 'terminated'
+  actual_end_date?: string; // YYYY-MM-DD
+  created_at?: string;
+  updated_at?: string;
+  _synced?: number;
   _last_modified?: number;
   is_deleted?: number;
   deleted_at?: string;
@@ -1140,6 +1142,44 @@ export class HurvesthubDB extends Dexie {
       console.log("Upgrading HurvesthubDB to version 29. (Schema for purchasedSeedlings added)");
       // Dexie automatically creates the new 'purchasedSeedlings' table.
       return Promise.resolve();
+    });
+// Version 30: Added status and actual_end_date to plantingLogs
+    this.version(30).stores({
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted', // Added status
+      // Carry over all other tables from version 29
+      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
+      supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
+      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+      seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
+      flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+      preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+      flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+      feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+      suppliers: 'id, name, is_deleted, _last_modified, _synced',
+      crops: 'id, name, variety, type, notes, is_deleted, _last_modified, _synced',
+      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
+      harvestLogs: 'id, planting_log_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
+      customers: 'id, name, customer_type, is_deleted, _last_modified, _synced',
+      saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced',
+      invoices: 'id, sale_id, invoice_number, is_deleted, _last_modified, _synced',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, is_deleted, _last_modified, _synced',
+      reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
+      purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
+    }).upgrade(async tx => {
+      // Upgrade path for plantingLogs: ensure status and actual_end_date exist
+      console.log("Upgrading HurvesthubDB to version 30: Adding 'status' and 'actual_end_date' to plantingLogs.");
+      await tx.table('plantingLogs').toCollection().modify(pl => {
+        if (pl.status === undefined) {
+          pl.status = 'active'; // Default new plantations to 'active'
+        }
+        if (pl.actual_end_date === undefined) {
+          pl.actual_end_date = null;
+        }
+      });
+      console.log("Finished upgrading HurvesthubDB to version 30.");
     });
 
     // Post-versioning sanity check for table instantiation

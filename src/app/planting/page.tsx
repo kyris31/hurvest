@@ -13,6 +13,7 @@ export default function PlantingLogsPage() {
   const [editingLog, setEditingLog] = useState<PlantingLog | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
+  const [isCompleting, setIsCompleting] = useState<string | null>(null); // New state
   const [error, setError] = useState<string | null>(null); // For form submission errors
 
   const plantingLogs = useLiveQuery(
@@ -229,6 +230,62 @@ export default function PlantingLogsPage() {
     }
   };
 
+  const handleMarkCompleted = async (id: string) => {
+    setError(null);
+    setIsCompleting(id);
+    try {
+      const log = await db.plantingLogs.get(id);
+      if (!log) {
+        throw new Error("Planting log not found to mark as completed.");
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      const enteredDate = window.prompt(`Enter the completion date for this plantation (YYYY-MM-DD). Leave blank for today (${today}):`, today);
+
+      if (enteredDate === null) { // User pressed cancel
+        setIsCompleting(null);
+        return;
+      }
+
+      const completionDate = enteredDate.trim() === '' ? today : enteredDate.trim();
+      
+      // Basic date validation (YYYY-MM-DD)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)) {
+        setError("Invalid date format. Please use YYYY-MM-DD.");
+        setIsCompleting(null);
+        return;
+      }
+
+      const changes: Partial<PlantingLog> = {
+        status: 'completed',
+        actual_end_date: completionDate,
+      };
+
+      await db.markForSync('plantingLogs', id, changes);
+      
+      // After successful local update, request a push to the server
+      try {
+        console.log("PlantingLogsPage: Push requesting after marking completed...");
+        const pushResult = await requestPushChanges();
+        if (pushResult.success) {
+          console.log("PlantingLogsPage: Push requested successfully after marking completed.");
+        } else {
+          console.error("PlantingLogsPage: Push request failed after marking completed.", pushResult.errors);
+          // Optionally, revert local change or notify user more strongly
+        }
+      } catch (syncError) {
+        console.error("Error requesting push after marking planting log completed:", syncError);
+      }
+
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : "Failed to mark planting log as completed.";
+      console.error(errorMessage, err);
+      setError(errorMessage);
+    } finally {
+      setIsCompleting(null);
+    }
+  };
+
   return (
     <div>
       <header className="bg-white shadow mb-6">
@@ -280,7 +337,9 @@ export default function PlantingLogsPage() {
             purchasedSeedlings={purchasedSeedlings} // Pass purchasedSeedlings
             onEdit={handleEdit}
             onDelete={handleDelete}
+            onMarkCompleted={handleMarkCompleted}
             isDeleting={isDeleting}
+            isCompleting={isCompleting}
           />
         )}
         {!isLoading && plantingLogs && plantingLogs.length === 0 && !error && (

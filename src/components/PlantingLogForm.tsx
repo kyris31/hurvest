@@ -23,6 +23,8 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
   const [quantityUnit, setQuantityUnit] = useState('');
   const [expectedHarvestDate, setExpectedHarvestDate] = useState('');
   const [notes, setNotes] = useState('');
+  const [status, setStatus] = useState<PlantingLog['status']>('active'); // New state
+  const [actualEndDate, setActualEndDate] = useState(''); // New state for YYYY-MM-DD
   
   const [availableSeedBatches, setAvailableSeedBatches] = useState<(SeedBatch & { cropDetails?: Crop })[]>([]);
   const [availableSeedlingLogs, setAvailableSeedlingLogs] = useState<(SeedlingProductionLog & { cropName?: string })[]>([]);
@@ -97,6 +99,8 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
       setQuantityUnit(initialData.quantity_unit || '');
       setExpectedHarvestDate(initialData.expected_harvest_date ? initialData.expected_harvest_date.split('T')[0] : '');
       setNotes(initialData.notes || '');
+      setStatus(initialData.status || 'active');
+      setActualEndDate(initialData.actual_end_date ? initialData.actual_end_date.split('T')[0] : '');
     } else {
       // Reset form
       setPlantingSourceType('seedBatch');
@@ -110,6 +114,8 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
       setQuantityUnit('');
       setExpectedHarvestDate('');
       setNotes('');
+      setStatus('active');
+      setActualEndDate('');
     }
   }, [initialData]);
 
@@ -137,10 +143,24 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
       if (!seedBatchId) { setFormError('Please select a Seed Batch.'); return; }
       const selectedBatch = availableSeedBatches.find(b => b.id === seedBatchId);
       if (!selectedBatch) { setFormError('Selected seed batch not found.'); return; }
-      const availableQty = selectedBatch.current_quantity ?? selectedBatch.initial_quantity;
-      if (availableQty !== undefined && Number(quantityPlanted) > availableQty) {
-        setFormError(`Not enough in seed batch. Available: ${availableQty} ${selectedBatch.quantity_unit || ''}.`); return;
+      const availableQty = selectedBatch.current_quantity ?? selectedBatch.initial_quantity ?? 0; // Default to 0 if undefined
+
+      // Stock validation logic
+      if (initialData && initialData.id && initialData.seed_batch_id === seedBatchId) {
+        // Editing an existing log, and the seed batch hasn't changed.
+        const originalQuantityPlanted = initialData.quantity_planted || 0;
+        const quantityChange = Number(quantityPlanted) - originalQuantityPlanted;
+        if (quantityChange > 0 && quantityChange > availableQty) {
+          // Trying to plant MORE than originally, and not enough additional stock.
+          setFormError(`Not enough additional stock in seed batch. Available to add: ${availableQty} ${selectedBatch.quantity_unit || ''}. You are trying to add ${quantityChange}.`); return;
+        }
+      } else {
+        // New log OR seed batch has changed (though UI currently prevents changing batch when editing)
+        if (Number(quantityPlanted) > availableQty) {
+          setFormError(`Not enough in seed batch. Available: ${availableQty} ${selectedBatch.quantity_unit || ''}.`); return;
+        }
       }
+
       finalLogData = {
         seed_batch_id: seedBatchId,
         seedling_production_log_id: undefined,
@@ -153,17 +173,41 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         quantity_unit: quantityUnit.trim() || selectedBatch.quantity_unit || 'items',
         expected_harvest_date: expectedHarvestDate || undefined,
         notes: notes.trim() || undefined,
+        status: initialData?.id ? status : 'active', // Only set status if editing, else default to active
+        actual_end_date: status === 'completed' || status === 'terminated' ? (actualEndDate || undefined) : undefined,
       };
-      if (!initialData) {
-        const newStock = (availableQty || 0) - Number(quantityPlanted);
+      // Stock update logic
+      if (initialData && initialData.id && initialData.seed_batch_id === seedBatchId) {
+        // Editing: adjust stock based on the difference
+        const originalQuantityPlanted = initialData.quantity_planted || 0;
+        const quantityDifference = Number(quantityPlanted) - originalQuantityPlanted;
+        if (quantityDifference !== 0) { // Only update if quantity actually changed
+          const newStock = availableQty - quantityDifference; // availableQty here is current stock *before* this save
+          stockUpdatePromise = db.seedBatches.update(seedBatchId, { current_quantity: newStock, _synced: 0, _last_modified: currentTimestamp });
+        }
+      } else if (!initialData) {
+        // New log: deduct full quantity
+        const newStock = availableQty - Number(quantityPlanted);
         stockUpdatePromise = db.seedBatches.update(seedBatchId, { current_quantity: newStock, _synced: 0, _last_modified: currentTimestamp });
       }
+      // If initialData exists but seed_batch_id changed, it would be handled like a new log (but UI prevents this for now)
+
     } else if (plantingSourceType === 'seedlingLog') {
       if (!seedlingProductionLogId) { setFormError('Please select a Seedling Production Log.'); return; }
       const selectedSeedlingLog = availableSeedlingLogs.find(sl => sl.id === seedlingProductionLogId);
       if (!selectedSeedlingLog) { setFormError('Selected seedling log not found.'); return; }
-      if (Number(quantityPlanted) > (selectedSeedlingLog.current_seedlings_available || 0)) {
-        setFormError(`Not enough seedlings available. Available: ${selectedSeedlingLog.current_seedlings_available || 0}.`); return;
+      const availableSeedlings = selectedSeedlingLog.current_seedlings_available || 0;
+
+      if (initialData && initialData.id && initialData.seedling_production_log_id === seedlingProductionLogId) {
+        const originalQuantityPlanted = initialData.quantity_planted || 0;
+        const quantityChange = Number(quantityPlanted) - originalQuantityPlanted;
+        if (quantityChange > 0 && quantityChange > availableSeedlings) {
+          setFormError(`Not enough additional self-produced seedlings. Available to add: ${availableSeedlings}. You are trying to add ${quantityChange}.`); return;
+        }
+      } else {
+        if (Number(quantityPlanted) > availableSeedlings) {
+          setFormError(`Not enough self-produced seedlings available. Available: ${availableSeedlings}.`); return;
+        }
       }
       finalLogData = {
         seed_batch_id: undefined,
@@ -177,17 +221,37 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         quantity_unit: 'seedlings',
         expected_harvest_date: expectedHarvestDate || undefined,
         notes: notes.trim() || undefined,
+        status: initialData?.id ? status : 'active',
+        actual_end_date: status === 'completed' || status === 'terminated' ? (actualEndDate || undefined) : undefined,
       };
-      if (!initialData) {
-        const newAvailableSeedlings = (selectedSeedlingLog.current_seedlings_available || 0) - Number(quantityPlanted);
+      if (initialData && initialData.id && initialData.seedling_production_log_id === seedlingProductionLogId) {
+        const originalQuantityPlanted = initialData.quantity_planted || 0;
+        const quantityDifference = Number(quantityPlanted) - originalQuantityPlanted;
+        if (quantityDifference !== 0) {
+          const newAvailableSeedlings = availableSeedlings - quantityDifference;
+          stockUpdatePromise = db.seedlingProductionLogs.update(seedlingProductionLogId, { current_seedlings_available: newAvailableSeedlings, _synced: 0, _last_modified: currentTimestamp });
+        }
+      } else if (!initialData) {
+        const newAvailableSeedlings = availableSeedlings - Number(quantityPlanted);
         stockUpdatePromise = db.seedlingProductionLogs.update(seedlingProductionLogId, { current_seedlings_available: newAvailableSeedlings, _synced: 0, _last_modified: currentTimestamp });
       }
+
     } else if (plantingSourceType === 'purchasedSeedling') {
       if (!purchasedSeedlingId) { setFormError('Please select a Purchased Seedling batch.'); return; }
       const selectedPurchasedSeedling = availablePurchasedSeedlings.find(ps => ps.id === purchasedSeedlingId);
       if (!selectedPurchasedSeedling) { setFormError('Selected purchased seedling batch not found.'); return; }
-      if (Number(quantityPlanted) > (selectedPurchasedSeedling.current_quantity || 0)) {
-        setFormError(`Not enough purchased seedlings available. Available: ${selectedPurchasedSeedling.current_quantity || 0} ${selectedPurchasedSeedling.quantity_unit || 'items'}.`); return;
+      const availablePurchasedQty = selectedPurchasedSeedling.current_quantity || 0;
+
+      if (initialData && initialData.id && initialData.purchased_seedling_id === purchasedSeedlingId) {
+        const originalQuantityPlanted = initialData.quantity_planted || 0;
+        const quantityChange = Number(quantityPlanted) - originalQuantityPlanted;
+        if (quantityChange > 0 && quantityChange > availablePurchasedQty) {
+          setFormError(`Not enough additional purchased seedlings. Available to add: ${availablePurchasedQty} ${selectedPurchasedSeedling.quantity_unit || 'items'}. You are trying to add ${quantityChange}.`); return;
+        }
+      } else {
+        if (Number(quantityPlanted) > availablePurchasedQty) {
+          setFormError(`Not enough purchased seedlings available. Available: ${availablePurchasedQty} ${selectedPurchasedSeedling.quantity_unit || 'items'}.`); return;
+        }
       }
       finalLogData = {
         seed_batch_id: undefined,
@@ -201,11 +265,21 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         quantity_unit: quantityUnit.trim() || selectedPurchasedSeedling.quantity_unit || 'seedlings',
         expected_harvest_date: expectedHarvestDate || undefined,
         notes: notes.trim() || undefined,
+        status: initialData?.id ? status : 'active',
+        actual_end_date: status === 'completed' || status === 'terminated' ? (actualEndDate || undefined) : undefined,
       };
-      if (!initialData) {
-        const newPurchasedQty = (selectedPurchasedSeedling.current_quantity || 0) - Number(quantityPlanted);
+      if (initialData && initialData.id && initialData.purchased_seedling_id === purchasedSeedlingId) {
+        const originalQuantityPlanted = initialData.quantity_planted || 0;
+        const quantityDifference = Number(quantityPlanted) - originalQuantityPlanted;
+        if (quantityDifference !== 0) {
+          const newPurchasedQty = availablePurchasedQty - quantityDifference;
+          stockUpdatePromise = db.purchasedSeedlings.update(purchasedSeedlingId, { current_quantity: newPurchasedQty, _synced: 0, _last_modified: currentTimestamp });
+        }
+      } else if (!initialData) {
+        const newPurchasedQty = availablePurchasedQty - Number(quantityPlanted);
         stockUpdatePromise = db.purchasedSeedlings.update(purchasedSeedlingId, { current_quantity: newPurchasedQty, _synced: 0, _last_modified: currentTimestamp });
       }
+      
     } else {
       setFormError("Invalid planting source type selected."); return;
     }
@@ -228,7 +302,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center p-4">
-      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg">
+      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-bold mb-6 text-gray-800">
           {initialData ? 'Edit Planting Log' : 'Record New Planting'}
         </h2>
@@ -413,6 +487,41 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
               disabled={isSubmitting}
             />
           </div>
+
+          {initialData && ( // Show status fields only when editing
+            <>
+              <div>
+                <label htmlFor="status" className="block text-sm font-medium text-gray-700">Status</label>
+                <select
+                  id="status"
+                  value={status}
+                  onChange={(e) => setStatus(e.target.value as PlantingLog['status'])}
+                  className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                  disabled={isSubmitting}
+                >
+                  <option value="active">Active</option>
+                  <option value="completed">Completed</option>
+                  <option value="terminated">Terminated</option>
+                </select>
+              </div>
+
+              {(status === 'completed' || status === 'terminated') && (
+                <div>
+                  <label htmlFor="actualEndDate" className="block text-sm font-medium text-gray-700">
+                    {status === 'completed' ? 'Completion Date' : 'Termination Date'}
+                  </label>
+                  <input
+                    type="date"
+                    id="actualEndDate"
+                    value={actualEndDate}
+                    onChange={(e) => setActualEndDate(e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                    disabled={isSubmitting}
+                  />
+                </div>
+              )}
+            </>
+          )}
 
           <div className="flex items-center justify-end space-x-3 pt-2">
             <button

@@ -11,7 +11,9 @@ interface PlantingLogListProps {
   purchasedSeedlings: PurchasedSeedling[]; // Added purchasedSeedlings prop
   onEdit: (log: PlantingLog) => void;
   onDelete: (id: string) => Promise<void>;
+  onMarkCompleted: (id: string) => Promise<void>; // New prop
   isDeleting: string | null;
+  isCompleting: string | null; // New prop
 }
 
 export default function PlantingLogList({
@@ -22,7 +24,9 @@ export default function PlantingLogList({
   purchasedSeedlings, // Destructure new prop
   onEdit,
   onDelete,
-  isDeleting
+  onMarkCompleted, // Destructure new prop
+  isDeleting,
+  isCompleting // Destructure new prop
 }: PlantingLogListProps) {
 
   const getCropDetails = (log: PlantingLog) => {
@@ -81,6 +85,7 @@ export default function PlantingLogList({
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Unit</th>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Expected Harvest</th>
             <th className="text-center py-3 px-5 uppercase font-semibold text-sm">Synced</th>
+            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Status</th>
             <th className="text-center py-3 px-5 uppercase font-semibold text-sm">Actions</th>
           </tr>
         </thead>
@@ -111,18 +116,37 @@ export default function PlantingLogList({
                   </span>
                 )}
               </td>
-              <td className="py-3 px-5 text-center">
+              <td className="py-3 px-5">
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                  log.status === 'completed' ? 'bg-gray-100 text-gray-800' :
+                  log.status === 'active' || !log.status ? 'bg-blue-100 text-blue-800' : // Treat undefined/null as active
+                  log.status === 'terminated' ? 'bg-red-100 text-red-800' :
+                  'bg-yellow-100 text-yellow-800' // Default for other statuses
+                }`}>
+                  {log.status ? log.status.charAt(0).toUpperCase() + log.status.slice(1) : 'Active'}
+                </span>
+              </td>
+              <td className="py-3 px-5 text-center whitespace-nowrap">
+                {(log.status === 'active' || !log.status) && (
+                  <button
+                    onClick={() => onMarkCompleted(log.id)}
+                    className="text-green-600 hover:text-green-800 font-medium mr-3 transition-colors duration-150 disabled:opacity-50"
+                    disabled={isCompleting === log.id || isDeleting === log.id}
+                  >
+                    {isCompleting === log.id ? 'Completing...' : 'Mark Completed'}
+                  </button>
+                )}
                 <button
                   onClick={() => onEdit(log)}
                   className="text-blue-600 hover:text-blue-800 font-medium mr-3 transition-colors duration-150"
-                  disabled={isDeleting === log.id}
+                  disabled={isCompleting === log.id || isDeleting === log.id}
                 >
                   Edit
                 </button>
                 <button
                   onClick={() => onDelete(log.id)}
                   className="text-red-600 hover:text-red-800 font-medium transition-colors duration-150 disabled:opacity-50"
-                  disabled={isDeleting === log.id}
+                  disabled={isCompleting === log.id || isDeleting === log.id}
                 >
                   {isDeleting === log.id ? 'Deleting...' : 'Delete'}
                 </button>
