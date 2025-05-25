@@ -21,10 +21,18 @@ const navItems = [
   { href: '/suppliers', label: 'Suppliers' }, // Added Suppliers
   { href: '/trees', label: 'Trees' }, // Added Trees link
   { href: '/reminders', label: 'Reminders' },
+  // Planning items will be moved to a dropdown
   { href: '/poultry/flocks', label: 'Poultry' },
   { href: '/reports', label: 'Reports' },
   // { href: '/reports/statement-of-account', label: 'Statement of Account' }, // This might be part of general reports
   { href: '/settings/poultry-schedules', label: 'Poultry Schedules' },
+];
+
+const planningNavItems = [
+  { href: '/planning/plots', label: 'Plots' },
+  { href: '/planning/crop-seasons', label: 'Crop Seasons' },
+  { href: '/planning/crop-plans', label: 'Crop Plans' },
+  { href: '/planning/calendar', label: 'Planning Calendar' },
 ];
 
 const quickAddNavItems = [
@@ -60,6 +68,7 @@ export default function Navigation({
   const [manualSyncMessage, setManualSyncMessage] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showPlanningMenu, setShowPlanningMenu] = useState(false); // State for Planning dropdown
 
   useEffect(() => {
     setMounted(true);
@@ -89,13 +98,42 @@ export default function Navigation({
           Hurvesthub
         </Link>
         <ul className="flex flex-wrap items-center space-x-2 sm:space-x-4 mb-2 sm:mb-0">
-          {navItems.map((item) => (
-            <li key={item.href}>
-              <Link href={item.href} className="hover:bg-green-600 px-2 py-1 sm:px-3 sm:py-2 rounded-md text-xs sm:text-sm font-medium">
-                {item.label}
-              </Link>
-            </li>
-          ))}
+          {navItems.map((item) => {
+            // Special handling for Planning dropdown trigger if we add it to navItems
+            // For now, we'll add it as a separate li item after the loop
+            return (
+              <li key={item.href}>
+                <Link href={item.href} className="hover:bg-green-600 px-2 py-1 sm:px-3 sm:py-2 rounded-md text-xs sm:text-sm font-medium">
+                  {item.label}
+                </Link>
+              </li>
+            );
+          })}
+          {/* Planning Dropdown */}
+          <li className="relative">
+            <button
+              onClick={() => setShowPlanningMenu(!showPlanningMenu)}
+              onBlur={() => setTimeout(() => setShowPlanningMenu(false), 150)}
+              className="hover:bg-green-600 px-2 py-1 sm:px-3 sm:py-2 rounded-md text-xs sm:text-sm font-medium flex items-center"
+            >
+              Planning
+              <svg className={`w-2.5 h-2.5 ml-1.5 transform transition-transform duration-200 ${showPlanningMenu ? 'rotate-180' : ''}`} aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="10 6 20 12"><path stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m1 1 4 4 4-4"/></svg>
+            </button>
+            {showPlanningMenu && (
+              <div className="absolute right-0 sm:left-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
+                {planningNavItems.map(item => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setShowPlanningMenu(false)}
+                    className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    {item.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </li>
            {/* Quick Add Dropdown */}
            <li className="relative">
             <button

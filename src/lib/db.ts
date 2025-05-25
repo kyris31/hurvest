@@ -64,6 +64,38 @@ export interface InputInventory {
   is_deleted?: number;
   deleted_at?: string;
 }
+export interface Plot {
+  id: string; // UUID
+  name: string;
+  description?: string;
+  length_m?: number;
+  width_m?: number;
+  area_sqm?: number;
+  status?: string; // e.g., 'active', 'fallow', 'in_use', 'needs_prep'
+  created_at?: string;
+  updated_at?: string;
+  is_deleted?: number;
+  deleted_at?: string;
+  _last_modified?: number;
+  _synced?: number;
+}
+export interface PlannedStageResource {
+  id: string; // UUID
+  crop_plan_stage_id: string; 
+  resource_type: 'LABOR' | 'INPUT_ITEM' | 'EQUIPMENT' | 'OTHER';
+  description: string;
+  input_inventory_id?: string; 
+  planned_quantity?: number;
+  quantity_unit?: string;
+  estimated_cost?: number;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  is_deleted?: number;
+  deleted_at?: string;
+  _last_modified?: number;
+  _synced?: number;
+}
 
 export interface PlantingLog { 
   id: string; // UUID
@@ -86,11 +118,114 @@ export interface PlantingLog {
   _last_modified?: number;
   is_deleted?: number;
   deleted_at?: string;
+  crop_plan_id?: string; // Link to CropPlan
+}
+
+export interface CropPlan {
+  id: string; // UUID
+  plan_name: string;
+  crop_id: string;
+  plot_id?: string;
+  crop_season_id: string;
+  planting_type: 'DIRECT_SEED' | 'TRANSPLANT_NURSERY' | 'TRANSPLANT_PURCHASED';
+  planned_sowing_date?: string; // YYYY-MM-DD
+  planned_transplant_date?: string; // YYYY-MM-DD
+  planned_first_harvest_date?: string; // YYYY-MM-DD
+  planned_last_harvest_date?: string; // YYYY-MM-DD
+  estimated_days_to_maturity?: number;
+  target_quantity_plants?: number;
+  target_quantity_area_sqm?: number;
+  target_yield_estimate_kg?: number;
+  target_yield_unit?: string;
+  status?: 'DRAFT' | 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  is_deleted?: number;
+  deleted_at?: string;
+  _last_modified?: number;
+  _synced?: number;
+}
+
+export interface CropPlanStage {
+  id: string; // UUID
+  crop_plan_id: string;
+  stage_name: string;
+  stage_type: 'NURSERY_SOWING' | 'NURSERY_POTTING_ON' | 'DIRECT_SEEDING' | 'SOIL_PREPARATION' | 'TRANSPLANTING' | 'FIELD_MAINTENANCE' | 'PEST_DISEASE_CONTROL' | 'HARVEST_WINDOW';
+  planned_start_date: string; // YYYY-MM-DD
+  planned_duration_days: number;
+  actual_start_date?: string; // YYYY-MM-DD
+  actual_end_date?: string; // YYYY-MM-DD
+  status?: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'SKIPPED';
+  notes?: string;
+
+  nursery_total_days?: number;
+  nursery_seeding_tray_type?: string;
+  nursery_seeds_per_cell?: number;
+  nursery_soil_mix_details?: string;
+  nursery_seeding_technique?: string;
+  nursery_days_before_repotting?: number;
+  nursery_repotting_container_type?: string;
+
+  direct_seed_rows_per_bed?: number;
+  direct_seed_seeder_type?: string;
+  direct_seed_spacing_in_row_cm?: number;
+  direct_seed_spacing_between_rows_cm?: number;
+  direct_seed_depth_cm?: number;
+  direct_seed_calibration?: string;
+
+  transplant_rows_per_bed?: number;
+  transplant_spacing_in_row_cm?: number;
+  transplant_spacing_between_rows_cm?: number;
+  transplant_source_container_type?: string;
+  transplant_row_marking_method?: string;
+  transplant_irrigation_details?: string;
+
+  generic_field_task_details?: string;
+  additional_details_json?: string; // Store as string, parse/stringify in app
+
+  created_at?: string;
+  updated_at?: string;
+  is_deleted?: number;
+  deleted_at?: string;
+  _last_modified?: number;
+  _synced?: number;
+}
+
+export interface CropPlanTask {
+  id: string; // UUID
+  crop_plan_stage_id: string;
+  task_description: string;
+  planned_due_date: string; // YYYY-MM-DD
+  actual_completion_date?: string; // YYYY-MM-DD
+  status?: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED' | 'CANCELLED';
+  assigned_to_user_id?: string; // Assuming user IDs are strings (UUIDs)
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+  is_deleted?: number;
+  deleted_at?: string;
+  _last_modified?: number;
+  _synced?: number;
+}
+
+export interface CropSeason {
+  id: string; // UUID
+  name: string;
+  start_date: string; // YYYY-MM-DD
+  end_date: string; // YYYY-MM-DD
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
+  is_deleted?: number;
+  deleted_at?: string;
+  _last_modified?: number;
+  _synced?: number;
 }
 
 export interface CultivationLog {
   id: string; // UUID
-  planting_log_id: string; 
+  planting_log_id: string;
   activity_date: string; 
   activity_type: string; 
   plot_affected?: string; 
@@ -461,7 +596,13 @@ export type HurvesthubTableName =
   | 'preventive_measure_schedules' // Corrected
   | 'supplierInvoices'
   | 'supplierInvoiceItems'
-  | 'purchasedSeedlings'; // Added new table name
+  | 'purchasedSeedlings' // Added new table name
+  | 'plots'
+  | 'cropSeasons'
+  | 'cropPlans'
+  | 'cropPlanStages'
+  | 'cropPlanTasks' // Added new planning tables
+  | 'plannedStageResources'; // Added new table for stage resources
 
 export class HurvesthubDB extends Dexie {
   crops!: Table<Crop, string>;
@@ -484,8 +625,14 @@ export class HurvesthubDB extends Dexie {
   feed_logs!: Table<FeedLog, string>;         // Dexie table name (property name)
   preventive_measure_schedules!: Table<PreventiveMeasureSchedule, string>; // Dexie table name
   supplierInvoices!: Table<SupplierInvoice, string>;
-  supplierInvoiceItems!: Table<SupplierInvoiceItem, string>; 
+  supplierInvoiceItems!: Table<SupplierInvoiceItem, string>;
   purchasedSeedlings!: Table<PurchasedSeedling, string>;
+  plots!: Table<Plot, string>;
+  cropSeasons!: Table<CropSeason, string>;
+  cropPlans!: Table<CropPlan, string>;
+  cropPlanStages!: Table<CropPlanStage, string>;
+  cropPlanTasks!: Table<CropPlanTask, string>;
+  plannedStageResources!: Table<PlannedStageResource, string>;
 
   constructor() {
     super('HurvesthubDB');
@@ -1182,6 +1329,87 @@ export class HurvesthubDB extends Dexie {
       console.log("Finished upgrading HurvesthubDB to version 30.");
     });
 
+    // Version 31: Added Crop Planning tables and crop_plan_id to plantingLogs
+    this.version(31).stores({
+      plots: 'id, name, status, _last_modified, _synced, is_deleted',
+      cropSeasons: 'id, name, start_date, end_date, _last_modified, _synced, is_deleted',
+      cropPlans: 'id, crop_id, plot_id, crop_season_id, status, planned_sowing_date, planned_transplant_date, _last_modified, _synced, is_deleted',
+      cropPlanStages: 'id, crop_plan_id, stage_type, status, planned_start_date, _last_modified, _synced, is_deleted',
+      cropPlanTasks: 'id, crop_plan_stage_id, status, planned_due_date, assigned_to_user_id, _last_modified, _synced, is_deleted',
+      
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, crop_plan_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted', // Added crop_plan_id
+
+      // Carry over all other tables from version 30
+      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
+      supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
+      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+      seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
+      flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+      preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+      flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+      feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+      suppliers: 'id, name, is_deleted, _last_modified, _synced',
+      crops: 'id, name, variety, type, notes, is_deleted, _last_modified, _synced',
+      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
+      harvestLogs: 'id, planting_log_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
+      customers: 'id, name, customer_type, is_deleted, _last_modified, _synced',
+      saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced',
+      invoices: 'id, sale_id, invoice_number, is_deleted, _last_modified, _synced',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, is_deleted, _last_modified, _synced',
+      reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
+      purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
+    }).upgrade(async tx => {
+      console.log("Upgrading HurvesthubDB to version 31: Adding Crop Planning tables and crop_plan_id to plantingLogs.");
+      // Dexie automatically creates new tables.
+      // For plantingLogs, ensure crop_plan_id exists if upgrading from a version where it didn't.
+      await tx.table('plantingLogs').toCollection().modify(pl => {
+        if (pl.crop_plan_id === undefined) {
+          pl.crop_plan_id = null;
+        }
+      });
+      console.log("Finished upgrading HurvesthubDB to version 31.");
+    });
+
+    // Version 32: Added plannedStageResources table
+    this.version(32).stores({
+      plannedStageResources: 'id, crop_plan_stage_id, resource_type, input_inventory_id, _last_modified, _synced, is_deleted',
+      
+      // Carry over all other tables from version 31
+      plots: 'id, name, status, _last_modified, _synced, is_deleted',
+      cropSeasons: 'id, name, start_date, end_date, _last_modified, _synced, is_deleted',
+      cropPlans: 'id, crop_id, plot_id, crop_season_id, status, planned_sowing_date, planned_transplant_date, _last_modified, _synced, is_deleted',
+      cropPlanStages: 'id, crop_plan_id, stage_type, status, planned_start_date, _last_modified, _synced, is_deleted',
+      cropPlanTasks: 'id, crop_plan_stage_id, status, planned_due_date, assigned_to_user_id, _last_modified, _synced, is_deleted',
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, crop_plan_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
+      supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
+      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+      seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
+      flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+      preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+      flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+      feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+      suppliers: 'id, name, is_deleted, _last_modified, _synced',
+      crops: 'id, name, variety, type, notes, is_deleted, _last_modified, _synced',
+      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
+      harvestLogs: 'id, planting_log_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
+      customers: 'id, name, customer_type, is_deleted, _last_modified, _synced',
+      saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced',
+      invoices: 'id, sale_id, invoice_number, is_deleted, _last_modified, _synced',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, is_deleted, _last_modified, _synced',
+      reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
+      purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
+    }).upgrade(async tx => {
+      console.log("Upgrading HurvesthubDB to version 32: Adding plannedStageResources table.");
+      // Dexie automatically creates new tables. No data migration needed for existing tables for this version.
+    });
+
     // Post-versioning sanity check for table instantiation
     try {
       console.log("DB Constructor: Attempting to access table names post-versioning.");
@@ -1248,7 +1476,9 @@ export async function getSyncStatus(): Promise<Record<string, { unsynced: number
         'saleItems', 'invoices', 'trees', 'reminders', 
         'seedlingProductionLogs', 'suppliers', 'supplierInvoices', 'supplierInvoiceItems',
         'flocks', 'flock_records', 'feed_logs',
-        'preventive_measure_schedules', 'purchasedSeedlings' // Added purchasedSeedlings
+        'preventive_measure_schedules', 'purchasedSeedlings',
+        'plots', 'cropSeasons', 'cropPlans', 'cropPlanStages', 'cropPlanTasks',
+        'plannedStageResources' // Added new table
     ];
 
     for (const tableName of tableNames) {
@@ -1264,5 +1494,3 @@ export async function getSyncStatus(): Promise<Record<string, { unsynced: number
     }
     return status;
 }
-
-// DATABASE_VERSION constant is not present, so I will not add it.

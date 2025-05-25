@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { PlantingLog, SeedBatch, Crop, SeedlingProductionLog, InputInventory, PurchasedSeedling, db } from '@/lib/db'; // Added PurchasedSeedling
+import { PlantingLog, SeedBatch, Crop, SeedlingProductionLog, InputInventory, PurchasedSeedling, CropPlan, db } from '@/lib/db'; // Added CropPlan
 
 interface PlantingLogFormProps {
   initialData?: PlantingLog | null;
@@ -25,7 +25,9 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState<PlantingLog['status']>('active'); // New state
   const [actualEndDate, setActualEndDate] = useState(''); // New state for YYYY-MM-DD
+  const [cropPlanId, setCropPlanId] = useState<string | undefined>(undefined); // For linking to CropPlan
   
+  const [availableCropPlans, setAvailableCropPlans] = useState<CropPlan[]>([]);
   const [availableSeedBatches, setAvailableSeedBatches] = useState<(SeedBatch & { cropDetails?: Crop })[]>([]);
   const [availableSeedlingLogs, setAvailableSeedlingLogs] = useState<(SeedlingProductionLog & { cropName?: string })[]>([]);
   const [availablePurchasedSeedlings, setAvailablePurchasedSeedlings] = useState<(PurchasedSeedling & { cropDetails?: Crop })[]>([]); // New state
@@ -34,15 +36,17 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
   useEffect(() => {
     const fetchFormData = async () => {
       try {
-        const [batchesData, cropsData, seedlingLogsData, purchasedSeedlingsData] = await Promise.all([
+        const [batchesData, cropsData, seedlingLogsData, purchasedSeedlingsData, cropPlansData] = await Promise.all([
           db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
           db.crops.filter(c => c.is_deleted !== 1).toArray(),
           db.seedlingProductionLogs.where('is_deleted').notEqual(1)
             .and(sl => (sl.current_seedlings_available || 0) > 0)
             .toArray(),
-          db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1 && ps.current_quantity > 0).toArray(), // Fetch purchased seedlings
+          db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1 && ps.current_quantity > 0).toArray(),
+          db.cropPlans.where('is_deleted').notEqual(1).and(p => p.status === 'PLANNED' || p.status === 'ACTIVE').toArray(), // Fetch active/planned crop plans
         ]);
         
+        setAvailableCropPlans(cropPlansData);
         const cropsMap = new Map(cropsData.map(crop => [crop.id, crop]));
 
         const enrichedBatches = batchesData.map(batch => {
@@ -101,6 +105,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
       setNotes(initialData.notes || '');
       setStatus(initialData.status || 'active');
       setActualEndDate(initialData.actual_end_date ? initialData.actual_end_date.split('T')[0] : '');
+      setCropPlanId(initialData.crop_plan_id || undefined);
     } else {
       // Reset form
       setPlantingSourceType('seedBatch');
@@ -116,6 +121,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
       setNotes('');
       setStatus('active');
       setActualEndDate('');
+      setCropPlanId(undefined);
     }
   }, [initialData]);
 
@@ -175,6 +181,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         notes: notes.trim() || undefined,
         status: initialData?.id ? status : 'active', // Only set status if editing, else default to active
         actual_end_date: status === 'completed' || status === 'terminated' ? (actualEndDate || undefined) : undefined,
+        crop_plan_id: cropPlanId || undefined,
       };
       // Stock update logic
       if (initialData && initialData.id && initialData.seed_batch_id === seedBatchId) {
@@ -223,6 +230,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         notes: notes.trim() || undefined,
         status: initialData?.id ? status : 'active',
         actual_end_date: status === 'completed' || status === 'terminated' ? (actualEndDate || undefined) : undefined,
+        crop_plan_id: cropPlanId || undefined,
       };
       if (initialData && initialData.id && initialData.seedling_production_log_id === seedlingProductionLogId) {
         const originalQuantityPlanted = initialData.quantity_planted || 0;
@@ -267,6 +275,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         notes: notes.trim() || undefined,
         status: initialData?.id ? status : 'active',
         actual_end_date: status === 'completed' || status === 'terminated' ? (actualEndDate || undefined) : undefined,
+        crop_plan_id: cropPlanId || undefined,
       };
       if (initialData && initialData.id && initialData.purchased_seedling_id === purchasedSeedlingId) {
         const originalQuantityPlanted = initialData.quantity_planted || 0;
@@ -308,6 +317,33 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
         </h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           {formError && <p className="text-red-500 text-sm mb-3">{formError}</p>}
+
+          <div>
+            <label htmlFor="cropPlanId" className="block text-sm font-medium text-gray-700">Link to Crop Plan (Optional)</label>
+            <select
+              id="cropPlanId"
+              value={cropPlanId || ''}
+              onChange={(e) => {
+                const selectedPlanId = e.target.value || undefined;
+                setCropPlanId(selectedPlanId);
+                // TODO: Optionally auto-fill fields based on selected plan
+                // const selectedPlan = availableCropPlans.find(p => p.id === selectedPlanId);
+                // if (selectedPlan) {
+                //   setPlantingDate(selectedPlan.planned_sowing_date || selectedPlan.planned_transplant_date || '');
+                //   // ... and so on for other fields like location (from plot), source type etc.
+                // }
+              }}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+              disabled={isSubmitting}
+            >
+              <option value="">None - Record ad-hoc planting</option>
+              {availableCropPlans.map(plan => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.plan_name} (Planned: {new Date(plan.planned_sowing_date || plan.planned_transplant_date || Date.now()).toLocaleDateString()})
+                </option>
+              ))}
+            </select>
+          </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Planting Source</label>
