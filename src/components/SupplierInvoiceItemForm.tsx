@@ -16,15 +16,15 @@ type SupplierInvoiceItemFormData = Omit<
   | 'is_deleted'
   | 'deleted_at'
   | 'input_inventory_id'
-  | 'line_total_gross' // Will be calculated
-  | 'apportioned_discount_amount' // Handled by processing
+  // Fields handled by parent/processing or complex apportionment
+  | 'apportioned_discount_amount'
   | 'apportioned_shipping_cost'
   | 'apportioned_other_charges'
   | 'line_subtotal_after_apportionment'
-  | 'vat_percentage' // For future
-  | 'vat_amount_on_line' // For future
-  // line_total_net is required by SupplierInvoiceItem, will be calculated before final save
-> & { line_total_net: number }; // Temporarily, form sends a preliminary net
+  // line_total_net, line_total_gross, item_vat_percentage, item_vat_amount,
+  // item_discount_type, item_discount_value, cost_after_item_adjustments
+  // will be included as they are part of SupplierInvoiceItem or calculated by the form.
+>;
 
 
 interface SupplierInvoiceItemFormProps {
@@ -46,6 +46,11 @@ export default function SupplierInvoiceItemForm({
   const [itemQuantityPerPackage, setItemQuantityPerPackage] = useState<number | ''>(initialData?.item_quantity_per_package ?? '');
   const [itemUnitOfMeasure, setItemUnitOfMeasure] = useState(initialData?.item_unit_of_measure || '');
   const [pricePerPackageGross, setPricePerPackageGross] = useState<number | ''>(initialData?.price_per_package_gross ?? '');
+  
+  const [itemDiscountType, setItemDiscountType] = useState<'Percentage' | 'Amount' | ''>(initialData?.item_discount_type ?? '');
+  const [itemDiscountValue, setItemDiscountValue] = useState<number | ''>(initialData?.item_discount_value ?? '');
+  const [itemVatPercentage, setItemVatPercentage] = useState<number | ''>(initialData?.item_vat_percentage ?? '');
+
   const [notes, setNotes] = useState(initialData?.notes || '');
   const [formError, setFormError] = useState<string | null>(null);
   const [internalIsSubmitting, setInternalIsSubmitting] = useState(false);
@@ -60,6 +65,9 @@ export default function SupplierInvoiceItemForm({
       setItemQuantityPerPackage(initialData.item_quantity_per_package ?? '');
       setItemUnitOfMeasure(initialData.item_unit_of_measure || '');
       setPricePerPackageGross(initialData.price_per_package_gross ?? '');
+      setItemDiscountType(initialData.item_discount_type ?? '');
+      setItemDiscountValue(initialData.item_discount_value ?? '');
+      setItemVatPercentage(initialData.item_vat_percentage ?? '');
       setNotes(initialData.notes || '');
     } else {
       // Reset for new item
@@ -69,6 +77,9 @@ export default function SupplierInvoiceItemForm({
       setItemQuantityPerPackage('');
       setItemUnitOfMeasure('');
       setPricePerPackageGross('');
+      setItemDiscountType('');
+      setItemDiscountValue('');
+      setItemVatPercentage('');
       setNotes('');
     }
   }, [initialData]);
@@ -94,10 +105,42 @@ export default function SupplierInvoiceItemForm({
       setFormError('Price per Package must be a non-negative number.');
       return;
     }
+    if (itemDiscountValue !== '' && (isNaN(Number(itemDiscountValue)) || Number(itemDiscountValue) < 0)) {
+      setFormError('Item Discount Value must be a non-negative number.');
+      return;
+    }
+    if (itemVatPercentage !== '' && (isNaN(Number(itemVatPercentage)) || Number(itemVatPercentage) < 0)) {
+      setFormError('Item VAT Percentage must be a non-negative number.');
+      return;
+    }
     
     setInternalIsSubmitting(true);
     try {
-      const calculatedLineTotalGross = Number(packageQuantity) * Number(pricePerPackageGross);
+      const lineTotalGrossOriginal = Number(packageQuantity) * Number(pricePerPackageGross);
+
+      let itemDiscountApplied = 0;
+      if (itemDiscountType && (itemDiscountValue !== '' && !isNaN(Number(itemDiscountValue)))) {
+        const discountVal = Number(itemDiscountValue);
+        if (itemDiscountType === 'Percentage') {
+          itemDiscountApplied = lineTotalGrossOriginal * (discountVal / 100);
+        } else { // Amount
+          itemDiscountApplied = discountVal;
+        }
+      }
+
+      const priceAfterItemDiscount = lineTotalGrossOriginal - itemDiscountApplied;
+
+      let calculatedItemVatAmount = 0;
+      const currentItemVatPercentage = (itemVatPercentage !== '' && !isNaN(Number(itemVatPercentage))) ? Number(itemVatPercentage) : 0;
+      if (currentItemVatPercentage > 0) {
+        calculatedItemVatAmount = priceAfterItemDiscount * (currentItemVatPercentage / 100);
+      }
+      
+      const costAfterItemAdjustments = priceAfterItemDiscount + calculatedItemVatAmount;
+      // For the form submission, line_total_net will be this cost_after_item_adjustments.
+      // The parent (EditSupplierInvoicePage) will handle apportioning invoice-level costs
+      // and calculating the *final* line_total_net.
+
       const formData: SupplierInvoiceItemFormData = {
         description_from_invoice: description.trim(),
         package_quantity: Number(packageQuantity),
@@ -105,18 +148,27 @@ export default function SupplierInvoiceItemForm({
         item_quantity_per_package: itemQuantityPerPackage === '' ? undefined : Number(itemQuantityPerPackage),
         item_unit_of_measure: itemUnitOfMeasure.trim() || undefined,
         price_per_package_gross: Number(pricePerPackageGross),
+        line_total_gross: lineTotalGrossOriginal,
+        item_discount_type: itemDiscountType || undefined,
+        item_discount_value: (itemDiscountValue !== '' && !isNaN(Number(itemDiscountValue))) ? Number(itemDiscountValue) : undefined,
+        item_vat_percentage: currentItemVatPercentage > 0 ? currentItemVatPercentage : undefined,
+        item_vat_amount: calculatedItemVatAmount,
+        cost_after_item_adjustments: costAfterItemAdjustments,
+        line_total_net: costAfterItemAdjustments, // Preliminary net; final net after invoice-level apportionment
         notes: notes.trim() || undefined,
-        line_total_net: calculatedLineTotalGross, // Placeholder: net = gross for now. Parent will calculate final.
       };
-      await onSubmit(formData, initialData?.id); 
+      await onSubmit(formData, initialData?.id);
       
-      if (!initialData) { 
+      if (!initialData) {
         setDescription('');
         setPackageQuantity('');
         setPackageUnitOfMeasure('');
         setItemQuantityPerPackage('');
         setItemUnitOfMeasure('');
         setPricePerPackageGross('');
+        setItemDiscountType('');
+        setItemDiscountValue('');
+        setItemVatPercentage('');
         setNotes('');
       }
     } catch (err) {
@@ -198,6 +250,41 @@ export default function SupplierInvoiceItemForm({
           className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
           required step="any" min="0" disabled={isActuallySubmitting}
         />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label htmlFor="itemDiscountType" className="block text-sm font-medium text-gray-700">Item Discount Type</label>
+          <select
+            id="itemDiscountType" value={itemDiscountType}
+            onChange={(e) => setItemDiscountType(e.target.value as 'Percentage' | 'Amount' | '')}
+            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+            disabled={isActuallySubmitting}
+          >
+            <option value="">None</option>
+            <option value="Percentage">Percentage (%)</option>
+            <option value="Amount">Amount (€)</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor="itemDiscountValue" className="block text-sm font-medium text-gray-700">Item Discount Value</label>
+          <input
+            type="number" id="itemDiscountValue" value={itemDiscountValue}
+            onChange={(e) => setItemDiscountValue(e.target.value === '' ? '' : parseFloat(e.target.value))}
+            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+            step="any" min="0" disabled={isActuallySubmitting || !itemDiscountType}
+            placeholder={!itemDiscountType ? "Select type first" : ""}
+          />
+        </div>
+        <div>
+          <label htmlFor="itemVatPercentage" className="block text-sm font-medium text-gray-700">Item VAT (%)</label>
+          <input
+            type="number" id="itemVatPercentage" value={itemVatPercentage}
+            onChange={(e) => setItemVatPercentage(e.target.value === '' ? '' : parseFloat(e.target.value))}
+            className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+            step="any" min="0" placeholder="e.g., 19" disabled={isActuallySubmitting}
+          />
+        </div>
       </div>
       
       <div>

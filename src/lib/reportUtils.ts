@@ -4,6 +4,26 @@ import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 
+// Extend the Window interface to include showSaveFilePicker for TypeScript
+declare global {
+  interface Window {
+    showSaveFilePicker?: (options?: {
+      suggestedName?: string;
+      types?: Array<{
+        description?: string;
+        accept?: Record<string, string | string[]>;
+      }>;
+      // TypeScript might also expect an ID for the picker, common in some definitions
+      // id?: string;
+      // startIn?: 'desktop' | 'documents' | 'downloads' | 'music' | 'pictures' | 'videos' | FileSystemHandle;
+    }) => Promise<FileSystemFileHandle>; // Assuming FileSystemFileHandle is globally known by TS
+  }
+  // We assume FileSystemFileHandle and FileSystemWritableFileStream are already globally defined
+  // by the TypeScript DOM library (lib.dom.d.ts or similar).
+  // If errors persist about these types not being found, then more specific global type
+  // definitions might be missing from the project's tsconfig or a newer TS lib version is needed.
+}
+
 // --- Dashboard Metrics Calculation ---
 export interface DashboardMetrics {
   totalRevenue: number;
@@ -495,9 +515,31 @@ export async function exportSalesToCSV(filters?: DateRangeFilters): Promise<void
         
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Sales_Report_${dateStamp}.csv`);
-        console.log("Sales CSV export initiated.");
-
+        const suggestedName = `reports/Hurvesthub_Sales_Report_${dateStamp}.csv`;
+        
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportSalesToCSV] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportSalesToCSV] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportSalesToCSV] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportSalesToCSV] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to export sales to CSV:", error);
         alert(`Error exporting sales data: ${error instanceof Error ? error.message : String(error)}`);
@@ -695,9 +737,31 @@ export async function exportInventoryToCSV(filters?: InventoryReportFilters): Pr
         
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Inventory_Summary_Report_${dateStamp}.csv`);
-        console.log("Inventory Summary CSV export initiated.");
-
+        const suggestedName = `reports/Hurvesthub_Inventory_Summary_Report_${dateStamp}.csv`;
+        
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportInventoryToCSV] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportInventoryToCSV] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportInventoryToCSV] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportInventoryToCSV] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to export inventory to CSV:", error);
         alert(`Error exporting inventory data: ${error instanceof Error ? error.message : String(error)}`);
@@ -824,9 +888,31 @@ export async function exportHarvestLogsToCSV(filters?: DateRangeFilters): Promis
         
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_HarvestLogs_Report_${dateStamp}.csv`);
-        console.log("Harvest Logs CSV export initiated.");
-
+        const suggestedName = `reports/Hurvesthub_HarvestLogs_Report_${dateStamp}.csv`;
+        
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportHarvestLogsToCSV] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportHarvestLogsToCSV] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportHarvestLogsToCSV] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportHarvestLogsToCSV] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to export harvest logs to CSV:", error);
         alert(`Error exporting harvest log data: ${error instanceof Error ? error.message : String(error)}`);
@@ -934,7 +1020,31 @@ export async function exportInventoryValueToCSV(filters?: InventoryReportFilters
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Inventory_Value_Report_${dateStamp}.csv`);
+        const suggestedName = `reports/Hurvesthub_Inventory_Value_Report_${dateStamp}.csv`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportInventoryValueToCSV] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportInventoryValueToCSV] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportInventoryValueToCSV] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportInventoryValueToCSV] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to export inventory value to CSV:", error);
         alert(`Error exporting inventory value data: ${error instanceof Error ? error.message : String(error)}`);
@@ -961,17 +1071,26 @@ export async function exportInventoryValueToPDF(filters?: InventoryReportFilters
         const customFont = await pdfDoc.embedFont(fontBytes);
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
-        yPos.y -= 10; // Space after header
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
+        
+        // Add Report Title
+        page.drawText("Inventory Value Report", {
+            x: margin,
+            y: yPos.y,
+            font: customBoldFont,
+            size: 18,
+            color: rgb(0,0,0)
+        });
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title
 
-        const tableHeaders = ["Item Name", "Type", "Crop", "Batch", "Supplier", "Qty", "Cost/Unit", "Total Value"];
-        const columnWidths = [100, 70, 70, 70, 80, 40, 50, 70]; 
+        const tableHeaders = ["Item Name", "Type", "Crop", "Supplier", "Qty", "Cost/Unit", "Total Value"];
+        const columnWidths = [115, 65, 65, 100, 40, 50, 70]; // Sum: 505, fits < 515
         
         const tableData = reportData.map(item => [
             item.itemName,
             item.itemType,
             item.cropName || '',
-            item.batchCode || '',
+            // item.batchCode || '', // Removed Batch
             item.supplier || '',
             item.currentQuantity ?? '',
             item.costPerUnit ? `€${item.costPerUnit.toFixed(2)}` : '-',
@@ -984,8 +1103,31 @@ export async function exportInventoryValueToPDF(filters?: InventoryReportFilters
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Inventory_Value_Report_${dateStamp}.pdf`);
+        const suggestedName = `reports/Hurvesthub_Inventory_Value_Report_${dateStamp}.pdf`;
 
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportInventoryValueToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportInventoryValueToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportInventoryValueToPDF] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportInventoryValueToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to generate inventory value PDF:", error);
         alert(`Error generating inventory value PDF: ${error instanceof Error ? error.message : String(error)}`);
@@ -1249,7 +1391,16 @@ export async function exportSalesToPDF(filters?: DateRangeFilters): Promise<void
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
-        yPos.y -= 10;
+        
+        // Add Report Title
+        page.drawText("Sales Report", {
+            x: margin,
+            y: yPos.y,
+            font: customBoldFont,
+            size: 18,
+            color: rgb(0,0,0)
+        });
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title
 
         const tableHeaders = ["Date", "Customer", "Invoice#", "Product", "Qty", "Price", "Discount", "Total"];
         const columnWidths = [60, 85, 70, 100, 30, 50, 60, 60]; // Adjusted widths
@@ -1271,7 +1422,40 @@ export async function exportSalesToPDF(filters?: DateRangeFilters): Promise<void
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Sales_Report_${dateStamp}.pdf`);
+        const suggestedName = `reports/Hurvesthub_Sales_Report_${dateStamp}.pdf`;
+        console.log(`[exportSalesToPDF] Attempting to save file. Suggested name: ${suggestedName}`);
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            console.log("[exportSalesToPDF] showSaveFilePicker is available. Trying to use it.");
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{
+                        description: 'PDF Files',
+                        accept: { 'application/pdf': ['.pdf'] },
+                    }],
+                });
+                console.log("[exportSalesToPDF] File handle obtained:", handle);
+                const writable = await handle.createWritable();
+                console.log("[exportSalesToPDF] Writable stream created.");
+                await writable.write(blob);
+                console.log("[exportSalesToPDF] Blob written to stream.");
+                await writable.close();
+                console.log("[exportSalesToPDF] File saved successfully via showSaveFilePicker.");
+            } catch (err: any) {
+                console.error("[exportSalesToPDF] Error using showSaveFilePicker:", err);
+                if (err.name !== 'AbortError') {
+                    alert(`Error saving file with new method: ${err.message}. Falling back to default download.`);
+                    console.log("[exportSalesToPDF] Fallback: Calling saveAs.");
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log("[exportSalesToPDF] File save cancelled by user.");
+                }
+            }
+        } else {
+            console.warn("[exportSalesToPDF] File System Access API (showSaveFilePicker) not supported. Using default saveAs download.");
+            saveAs(blob, suggestedName);
+        }
 
     } catch (error) {
         console.error("Failed to generate sales PDF:", error);
@@ -1301,17 +1485,28 @@ export async function exportInventoryToPDF(filters?: InventoryReportFilters): Pr
         const customFont = await pdfDoc.embedFont(fontBytes);
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
-        yPos.y -= 10; // Space after header
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
+        
+        // Add Report Title
+        page.drawText("Inventory Report", {
+            x: margin,
+            y: yPos.y, // yPos is already adjusted by addPdfHeader if it draws something at the very top
+            font: customBoldFont,
+            size: 18,
+            color: rgb(0,0,0)
+        });
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title
 
-        const tableHeaders = ["Item Name", "Type", "Crop", "Batch Code", "Supplier", "Qty", "Unit", "Notes"];
-        const columnWidths = [100, 60, 70, 70, 80, 40, 50, 100];
+        const tableHeaders = ["Item Name", "Type", "Crop", "Supplier", "Qty", "Unit", "Notes"];
+        // Original: [100, 60, 70, 70, 80, 40, 50, 100] (Total 570 without Batch Code: 500)
+        // New: Distribute the removed 70 width. Let's give more to Item Name and Notes.
+        const columnWidths = [100, 60, 70, 90, 40, 50, 105]; // Sum: 515
         
         const tableData = inventoryReportData.map(item => [
             item.itemName,
             item.itemType,
             item.cropName || '',
-            item.batchCode || '',
+            // item.batchCode || '', // Removed Batch Code
             item.supplier || '',
             item.currentQuantity ?? '',
             item.quantityUnit || '',
@@ -1324,8 +1519,31 @@ export async function exportInventoryToPDF(filters?: InventoryReportFilters): Pr
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Inventory_Report_${dateStamp}.pdf`);
+        const suggestedName = `reports/Hurvesthub_Inventory_Report_${dateStamp}.pdf`;
 
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportInventoryToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportInventoryToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportInventoryToPDF] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportInventoryToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to generate inventory PDF:", error);
         alert(`Error generating inventory PDF: ${error instanceof Error ? error.message : String(error)}`);
@@ -1351,11 +1569,20 @@ export async function exportHarvestLogsToPDF(filters?: DateRangeFilters): Promis
         const customFont = await pdfDoc.embedFont(fontBytes);
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
-        yPos.y -= 10;
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
+        
+        // Add Report Title
+        page.drawText("Harvest Log Report", {
+            x: margin,
+            y: yPos.y,
+            font: customBoldFont,
+            size: 18,
+            color: rgb(0,0,0)
+        });
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title
 
         const tableHeaders = ["Harvest Date", "Crop", "Variety", "Qty", "Unit", "Quality", "Planting Date", "Location", "Notes"];
-        const columnWidths = [60, 80, 70, 40, 40, 60, 60, 80, 80];
+        const columnWidths = [60, 60, 60, 40, 40, 60, 60, 60, 65]; // Sum: 505
         
         const tableData = harvestReportData.map(item => [
             item.harvestDate,
@@ -1375,8 +1602,31 @@ export async function exportHarvestLogsToPDF(filters?: DateRangeFilters): Promis
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Harvest_Logs_Report_${dateStamp}.pdf`);
+        const suggestedName = `reports/Hurvesthub_Harvest_Logs_Report_${dateStamp}.pdf`;
 
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportHarvestLogsToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportHarvestLogsToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportHarvestLogsToPDF] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportHarvestLogsToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to generate harvest logs PDF:", error);
         alert(`Error generating harvest logs PDF: ${error instanceof Error ? error.message : String(error)}`);
@@ -1385,8 +1635,8 @@ export async function exportHarvestLogsToPDF(filters?: DateRangeFilters): Promis
 
 
 export interface SeedlingLifecycleReportItem {
-    seedBatchId: string;
-    seedBatchCode: string;
+    // seedBatchId: string; // Kept if other logic might use it, but not for PDF display
+    // seedBatchCode: string; // Removed for PDF display
     cropName?: string;
     sowingDate: string;
     quantitySownDisplay: string; // e.g., "100 seeds" or "5 grams"
@@ -1412,21 +1662,22 @@ async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promi
     const cropIds = seedlingLogs.map(sl => sl.crop_id);
     const seedlingLogIds = seedlingLogs.map(sl => sl.id);
 
-    const [seedBatches, crops, plantingLogs, harvestLogs, saleItems] = await Promise.all([
-        db.seedBatches.where('id').anyOf(seedBatchIds).toArray(),
+    // Removed seedBatches from Promise.all as seedBatchCode is no longer directly needed for this report's display
+    const [crops, plantingLogs, harvestLogs, saleItems] = await Promise.all([
+        // db.seedBatches.where('id').anyOf(seedBatchIds).toArray(), // No longer fetching seedBatches here
         db.crops.where('id').anyOf(cropIds).toArray(),
         db.plantingLogs.where('seedling_production_log_id').anyOf(seedlingLogIds).and(pl => pl.is_deleted !== 1).toArray(),
-        db.harvestLogs.filter(hl => hl.is_deleted !== 1).toArray(), // Fetched broadly, then filtered
-        db.saleItems.filter(si => si.is_deleted !== 1).toArray() // Fetched broadly, then filtered
+        db.harvestLogs.filter(hl => hl.is_deleted !== 1).toArray(),
+        db.saleItems.filter(si => si.is_deleted !== 1).toArray()
     ]);
 
     const cropMap = new Map(crops.map(c => [c.id, c]));
-    const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb]));
+    // const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb])); // No longer needed
 
     const reportItems: SeedlingLifecycleReportItem[] = [];
 
     for (const sl of seedlingLogs) {
-        const seedBatch = seedBatchMap.get(sl.seed_batch_id);
+        // const seedBatch = seedBatchMap.get(sl.seed_batch_id); // No longer needed for batch code
         const crop = cropMap.get(sl.crop_id);
         const plantingsFromThisSeedlingLog = plantingLogs.filter(pl => pl.seedling_production_log_id === sl.id);
         const seedlingsTransplanted = plantingsFromThisSeedlingLog.reduce((sum, pl) => sum + (pl.quantity_planted || 0), 0);
@@ -1442,8 +1693,8 @@ async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promi
         const totalSoldFromSeedlings = saleItemsForTheseHarvests.reduce((sum, si) => sum + (si.quantity_sold || 0), 0);
 
         reportItems.push({
-            seedBatchId: sl.seed_batch_id,
-            seedBatchCode: seedBatch?.batch_code || 'N/A',
+            // seedBatchId: sl.seed_batch_id, // Removed
+            // seedBatchCode: seedBatch?.batch_code || 'N/A', // Removed
             cropName: crop?.name || 'N/A',
             sowingDate: new Date(sl.sowing_date).toLocaleDateString(),
             quantitySownDisplay: `${sl.quantity_sown_value} ${sl.sowing_unit_from_batch || 'units'}`,
@@ -1477,15 +1728,25 @@ export async function exportSeedlingLifecycleToPDF(filters?: DateRangeFilters): 
         const customFont = await pdfDoc.embedFont(fontBytes);
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
-        yPos.y -= 10;
+        // Draw title manually for this specific report
+        page.drawText("Seedling Lifecycle Report", {
+            x: margin,
+            y: yPos.y,
+            font: customBoldFont, // Use bold for title
+            size: 18, // Title size
+            color: rgb(0,0,0)
+        });
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title, ensure enough space for header line if addPdfHeader is used
 
-        const tableHeaders = ["Crop", "Batch", "Sown", "Sown Qty", "Produced", "Transplanted", "Harvested", "Sold", "Remaining Seedlings"];
-        const columnWidths = [70, 70, 60, 50, 50, 60, 60, 50, 70];
+        // If addPdfHeader draws a generic header line or company info, call it here:
+        // await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
+        // yPos.y -= 10; // Adjust if addPdfHeader was called and drew something
 
+        const tableHeaders = ["Crop", "Sown", "Sown Qty", "Produced", "Transplanted", "Harvested", "Sold", "Remaining Seedlings"];
+        const columnWidths = [80, 50, 50, 50, 70, 50, 50, 75]; // Adjusted for Transplanted header
+        
         const tableData = reportData.map(item => [
             item.cropName,
-            item.seedBatchCode,
             item.sowingDate,
             `${item.quantitySownDisplay}`,
             item.seedlingsProduced,
@@ -1501,7 +1762,34 @@ export async function exportSeedlingLifecycleToPDF(filters?: DateRangeFilters): 
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Seedling_Lifecycle_Report_${dateStamp}.pdf`);
+const suggestedName = `reports/Hurvesthub_Seedling_Lifecycle_Report_${dateStamp}.pdf`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportSeedlingLifecycleToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+                return; // Exit after successful save
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportSeedlingLifecycleToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    // Fallback to original saveAs is below
+                } else {
+                    console.log(`[exportSeedlingLifecycleToPDF] File save cancelled by user: ${suggestedName}`);
+                    return; // Exit if user cancelled
+                }
+            }
+        } else {
+            console.warn(`[exportSeedlingLifecycleToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+            // Fallback to original saveAs is below, ensure suggestedName is used
+        }
+        // saveAs(blob, `Hurvesthub_Seedling_Lifecycle_Report_${dateStamp}.pdf`); // Original line commented out
     } catch (error) {
         console.error("Failed to generate seedling lifecycle PDF:", error);
         alert(`Error generating seedling lifecycle PDF: ${error instanceof Error ? error.message : String(error)}`);
@@ -1509,13 +1797,28 @@ export async function exportSeedlingLifecycleToPDF(filters?: DateRangeFilters): 
 }
 
 function convertSeedlingLifecycleToCSV(data: SeedlingLifecycleReportItem[]): string {
-    const headers = ["Crop Name", "Seed Batch Code", "Sowing Date", "Quantity Sown", "Seedlings Produced", "Seedlings Transplanted", "Total Harvested", "Total Sold", "Current Seedlings Available", "Notes"];
+    const headers = [
+        "Crop Name",
+        "Sowing Date",
+        "Quantity Sown",
+        "Seedlings Produced",
+        "Seedlings Transplanted",
+        "Total Harvested from Seedlings",
+        "Total Sold from Seedlings",
+        "Current Seedlings Available",
+        "Notes"
+    ];
     const csvRows = [headers.join(',')];
     data.forEach(item => {
         const row = [
-            `"${item.cropName || ''}"`, `"${item.seedBatchCode}"`, `"${item.sowingDate}"`,
-            `"${item.quantitySownDisplay}"`, item.seedlingsProduced, item.seedlingsTransplanted,
-            item.totalHarvestedFromSeedlings, item.totalSoldFromSeedlings, item.currentSeedlingsAvailable,
+            `"${(item.cropName || 'N/A').replace(/"/g, '""')}"`,
+            `"${item.sowingDate}"`,
+            `"${item.quantitySownDisplay.replace(/"/g, '""')}"`,
+            item.seedlingsProduced,
+            item.seedlingsTransplanted,
+            item.totalHarvestedFromSeedlings,
+            item.totalSoldFromSeedlings,
+            item.currentSeedlingsAvailable,
             `"${(item.notes || '').replace(/"/g, '""')}"`
         ];
         csvRows.push(row.join(','));
@@ -1529,7 +1832,35 @@ export async function exportSeedlingLifecycleToCSV(filters?: DateRangeFilters): 
         if (reportData.length === 0) { alert("No data for Seedling Lifecycle CSV."); return; }
         const csvData = convertSeedlingLifecycleToCSV(reportData);
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, `Hurvesthub_Seedling_Lifecycle_${new Date().toISOString().split('T')[0]}.csv`);
+const dateStamp = new Date().toISOString().split('T')[0];
+        const suggestedName = `reports/Hurvesthub_Seedling_Lifecycle_${dateStamp}.csv`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportSeedlingLifecycleToCSV] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+                return; // Exit after successful save with picker
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportSeedlingLifecycleToCSV] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    // Fallback to original saveAs is below
+                } else {
+                    console.log(`[exportSeedlingLifecycleToCSV] File save cancelled by user: ${suggestedName}`);
+                    return; // Exit if user cancelled
+                }
+            }
+        } else {
+            console.warn(`[exportSeedlingLifecycleToCSV] File System Access API not supported. Using default download for: ${suggestedName}`);
+            // Fallback to original saveAs is below, ensure suggestedName is used
+        }
+        // saveAs(blob, `Hurvesthub_Seedling_Lifecycle_${new Date().toISOString().split('T')[0]}.csv`); // Original line commented out, new logic uses suggestedName
     } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
 }
 
@@ -1592,7 +1923,32 @@ export async function exportOrganicComplianceToCSV(filters?: DateRangeFilters): 
         if (reportData.length === 0) { alert("No data for Organic Compliance CSV."); return; }
         const csvData = convertOrganicComplianceToCSV(reportData);
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, `Hurvesthub_Organic_Compliance_${new Date().toISOString().split('T')[0]}.csv`);
+        const dateStamp = new Date().toISOString().split('T')[0];
+        const suggestedName = `reports/Hurvesthub_Organic_Compliance_${dateStamp}.csv`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportOrganicComplianceToCSV] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportOrganicComplianceToCSV] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportOrganicComplianceToCSV] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportOrganicComplianceToCSV] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
 }
 
@@ -1616,14 +1972,23 @@ export async function exportOrganicComplianceToPDF(filters?: DateRangeFilters): 
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
-        yPos.y -= 10;
+        
+        // Add Report Title
+        page.drawText("Organic Compliance Report", {
+            x: margin,
+            y: yPos.y,
+            font: customBoldFont,
+            size: 18,
+            color: rgb(0,0,0)
+        });
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title
 
-        const tableHeaders = ["Crop", "Batch Code", "Supplier", "Purchase Date", "Organic Status", "Notes"];
-        const columnWidths = [100, 100, 100, 80, 100, 100]; 
+        const tableHeaders = ["Crop", "Supplier", "Purchase Date", "Organic Status", "Notes"];
+        const columnWidths = [100, 100, 70, 100, 110]; // Sum: 480
         
         const tableData = reportData.map(item => [
             item.cropName || '',
-            item.batchCode,
+            // item.batchCode, // Removed Batch Code
             item.supplier || '',
             item.purchaseDate || '',
             item.organicStatus || '',
@@ -1636,7 +2001,31 @@ export async function exportOrganicComplianceToPDF(filters?: DateRangeFilters): 
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Organic_Compliance_Report_${dateStamp}.pdf`);
+        const suggestedName = `reports/Hurvesthub_Organic_Compliance_Report_${dateStamp}.pdf`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportOrganicComplianceToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportOrganicComplianceToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportOrganicComplianceToPDF] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportOrganicComplianceToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to generate organic compliance PDF:", error);
         alert(`Error generating organic compliance PDF: ${error instanceof Error ? error.message : String(error)}`);
@@ -1816,7 +2205,31 @@ export async function exportInputItemUsageLedgerToPDF(filters?: { itemId?: strin
 
     const pdfBytes = await pdfDoc.save();
     const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-    saveAs(blob, `Hurvesthub_UsageLedger_${item.itemName.replace(/\s/g, '_')}.pdf`);
+    const suggestedName = `reports/Hurvesthub_UsageLedger_${item.itemName.replace(/\s/g, '_')}.pdf`;
+
+    if (typeof window.showSaveFilePicker === 'function') {
+        try {
+            const handle = await window.showSaveFilePicker({
+                suggestedName: suggestedName,
+                types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            console.log(`[exportInputItemUsageLedgerToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+        } catch (err: any) {
+            if (err.name !== 'AbortError') {
+                console.error(`[exportInputItemUsageLedgerToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                saveAs(blob, suggestedName);
+            } else {
+                console.log(`[exportInputItemUsageLedgerToPDF] File save cancelled by user: ${suggestedName}`);
+            }
+        }
+    } else {
+        console.warn(`[exportInputItemUsageLedgerToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+        saveAs(blob, suggestedName);
+    }
 }
 
 
@@ -1891,8 +2304,17 @@ export async function exportGroupedInventorySummaryToPDF(): Promise<void> {
         const customFont = await pdfDoc.embedFont(fontBytes);
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
-        yPos.y -= 10;
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
+        
+        // Add Report Title
+        page.drawText("Grouped Inventory Summary Report", {
+            x: margin,
+            y: yPos.y,
+            font: customBoldFont,
+            size: 18,
+            color: rgb(0,0,0)
+        });
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title
 
         const tableHeaders = ["Item Name", "Type", "Total Current Qty", "Unit", "Total Value (€)"];
         const columnWidths = [150, 80, 80, 60, 100];
@@ -1911,7 +2333,31 @@ export async function exportGroupedInventorySummaryToPDF(): Promise<void> {
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Grouped_Inventory_Summary_${dateStamp}.pdf`);
+        const suggestedName = `reports/Hurvesthub_Grouped_Inventory_Summary_${dateStamp}.pdf`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportGroupedInventorySummaryToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportGroupedInventorySummaryToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportGroupedInventorySummaryToPDF] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportGroupedInventorySummaryToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to generate grouped inventory summary PDF:", error);
         alert(`Error generating PDF: ${error instanceof Error ? error.message : String(error)}`);
@@ -2019,8 +2465,17 @@ export async function exportDetailedInputUsageToPDF(filters?: DateRangeFilters):
         const customFont = await pdfDoc.embedFont(fontBytes);
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont); 
-        yPos.y -= 10;
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
+        
+        // Add Report Title
+        page.drawText("Detailed Input Usage Report", {
+            x: margin,
+            y: yPos.y,
+            font: customBoldFont,
+            size: 18,
+            color: rgb(0,0,0)
+        });
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title
 
         const tableHeaders = ["Date", "Input Item", "Activity", "Crop", "Plot", "Qty Used", "Unit"];
         const columnWidths = [70, 100, 80, 80, 70, 50, 50];
@@ -2041,7 +2496,31 @@ export async function exportDetailedInputUsageToPDF(filters?: DateRangeFilters):
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         const now = new Date();
         const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        saveAs(blob, `Hurvesthub_Detailed_Input_Usage_Report_${dateStamp}.pdf`);
+        const suggestedName = `reports/Hurvesthub_Detailed_Input_Usage_Report_${dateStamp}.pdf`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportDetailedInputUsageToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportDetailedInputUsageToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportDetailedInputUsageToPDF] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportDetailedInputUsageToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (error) {
         console.error("Failed to generate detailed input usage PDF:", error);
         alert(`Error generating PDF: ${error instanceof Error ? error.message : String(error)}`);
@@ -2117,13 +2596,13 @@ export async function exportSeedSourceDeclarationToPDF(filters?: DateRangeFilter
         page.drawText("Seed Source Declaration Report", { x: margin, y: yPos.y, font: customBoldFont, size: 14});
         yPos.y -= 20;
 
-        const tableHeaders = ["Crop", "Variety", "Batch Code", "Supplier", "Purchase Date", "Organic Status", "Declaration"];
-        const columnWidths = [100, 80, 80, 100, 70, 90, 50];
+        const tableHeaders = ["Crop", "Variety", "Supplier", "Purchase Date", "Organic Status", "Declaration"];
+        const columnWidths = [100, 100, 100, 70, 90, 50]; // Sum: 510
         
         const tableData = reportData.map(item => [
             item.cropName,
             item.variety || '-',
-            item.seedBatchCode,
+            // item.seedBatchCode, // Removed Batch Code
             item.supplier || '-',
             item.purchaseDate || '-',
             item.organicStatus || '-',
@@ -2134,7 +2613,32 @@ export async function exportSeedSourceDeclarationToPDF(filters?: DateRangeFilter
         
         const pdfBytes = await pdfDoc.save();
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        saveAs(blob, `Hurvesthub_Seed_Source_Declaration_${new Date().toISOString().split('T')[0]}.pdf`);
+        const dateStamp = new Date().toISOString().split('T')[0];
+        const suggestedName = `reports/Hurvesthub_Seed_Source_Declaration_${dateStamp}.pdf`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportSeedSourceDeclarationToPDF] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportSeedSourceDeclarationToPDF] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportSeedSourceDeclarationToPDF] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportSeedSourceDeclarationToPDF] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
 }
 
@@ -2158,7 +2662,32 @@ export async function exportSeedSourceDeclarationToCSV(filters?: DateRangeFilter
         if (reportData.length === 0) { alert("No data for Seed Source Declaration CSV."); return; }
         const csvData = convertSeedSourceDeclarationToCSV(reportData);
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
-        saveAs(blob, `Hurvesthub_Seed_Source_Declaration_${new Date().toISOString().split('T')[0]}.csv`);
+        const dateStamp = new Date().toISOString().split('T')[0];
+        const suggestedName = `reports/Hurvesthub_Seed_Source_Declaration_${dateStamp}.csv`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'CSV Files', accept: { 'text/csv': ['.csv'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                console.log(`[exportSeedSourceDeclarationToCSV] File saved successfully via showSaveFilePicker: ${suggestedName}`);
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error(`[exportSeedSourceDeclarationToCSV] Error saving file with File System Access API (${suggestedName}):`, err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log(`[exportSeedSourceDeclarationToCSV] File save cancelled by user: ${suggestedName}`);
+                }
+            }
+        } else {
+            console.warn(`[exportSeedSourceDeclarationToCSV] File System Access API not supported. Using default download for: ${suggestedName}`);
+            saveAs(blob, suggestedName);
+        }
     } catch (e) { console.error(e); alert(`Error: ${e instanceof Error ? e.message : String(e)}`); }
 }
 

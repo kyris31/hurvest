@@ -2,6 +2,20 @@ import { PDFDocument, StandardFonts, rgb, PDFFont, RGB } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
 import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice } from './db';
 import { db } from './db';
+
+// Extend the Window interface to include showSaveFilePicker for TypeScript
+declare global {
+  interface Window {
+    showSaveFilePicker?: (options?: {
+      suggestedName?: string;
+      types?: Array<{
+        description?: string;
+        accept?: Record<string, string | string[]>;
+      }>;
+    }) => Promise<FileSystemFileHandle>;
+  }
+  // Assuming FileSystemFileHandle and FileSystemWritableFileStream are already globally defined
+}
 import { saveAs } from 'file-saver';
 import { APP_NAME, KK_BIOFRESH_INFO } from '@/config'; // Using alias, assuming config.ts will be moved
 
@@ -423,15 +437,51 @@ export async function downloadInvoicePDF(saleId: string) {
         const blob = new Blob([pdfBytes], { type: 'application/pdf' });
         
         const invoiceRecord = await db.invoices.where('sale_id').equals(saleId).first();
-        const fileName = invoiceRecord ? `Invoice-${invoiceRecord.invoice_number}.pdf` : `Invoice-${saleId.substring(0,8)}.pdf`;
+        const saleRecord = await db.sales.get(saleId); // Fetch sale record for payment status
+
+        let folder = 'invoices';
+        let baseFileName = `Invoice-${invoiceRecord?.invoice_number || saleId.substring(0,8)}.pdf`;
+
+        if (saleRecord?.payment_status === 'paid') {
+            folder = 'receipts';
+            // Optionally, change the base file name for receipts
+            if (saleRecord.payment_method === 'cash') {
+                baseFileName = `CashReceipt-${invoiceRecord?.invoice_number || saleId.substring(0,8)}.pdf`;
+            } else {
+                baseFileName = `PaidInvoice-${invoiceRecord?.invoice_number || saleId.substring(0,8)}.pdf`;
+            }
+        }
         
-        saveAs(blob, fileName);
+        const suggestedName = `${folder}/${baseFileName}`;
+        
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: suggestedName,
+                    types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error("Error saving Invoice/Receipt PDF with File System Access API:", err);
+                    alert(`Error saving file: ${err.message}. File will be downloaded conventionally.`);
+                    saveAs(blob, suggestedName);
+                } else {
+                    console.log("Invoice/Receipt PDF save cancelled by user.");
+                }
+            }
+        } else {
+            console.warn("File System Access API not supported for Invoice/Receipt PDF. Using default download.");
+            saveAs(blob, suggestedName);
+        }
 
         // Optionally, update Dexie with a local blob URL or mark as downloaded
         // For now, we assume the PDF is generated on-demand for download/print
         if (invoiceRecord && invoiceRecord.pdf_url?.startsWith('placeholder_')) {
              // This is a placeholder update. In reality, you'd get a real URL if storing.
-            await db.invoices.update(invoiceRecord.id, { pdf_url: `local_generated_${fileName}`, _synced: 0, _last_modified: Date.now() });
+            await db.invoices.update(invoiceRecord.id, { pdf_url: `local_generated_${suggestedName}`, _synced: 0, _last_modified: Date.now() });
         }
 
     } catch (error) {

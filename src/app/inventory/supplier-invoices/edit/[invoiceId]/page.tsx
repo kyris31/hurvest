@@ -17,15 +17,16 @@ type SupplierInvoiceItemFormData = Omit<
   | 'is_deleted'
   | 'deleted_at'
   | 'input_inventory_id'
-  | 'line_total_gross' 
-  | 'apportioned_discount_amount' 
+  // These are handled by the processing logic or are not directly set by the item form in this page
+  | 'apportioned_discount_amount'
   | 'apportioned_shipping_cost'
   | 'apportioned_other_charges'
   | 'line_subtotal_after_apportionment'
-  | 'vat_percentage' 
-  | 'vat_amount_on_line'
-> & { line_total_net: number };
-
+  // line_total_net, line_total_gross, item_vat_percentage, item_vat_amount,
+  // item_discount_type, item_discount_value, cost_after_item_adjustments
+  // are expected from the form or are part of SupplierInvoiceItem
+>;
+// The form now submits a more complete SupplierInvoiceItem-like object.
 
 export default function EditSupplierInvoicePage() {
   const router = useRouter();
@@ -178,52 +179,78 @@ export default function EditSupplierInvoicePage() {
       const processedItemsData: SupplierInvoiceItem[] = []; 
       let totalSubtotalOfAllItemsForVATApportion = 0;
 
-      // First pass: apportion discounts, shipping, other charges
+      // First pass: Calculate base for apportionment (cost_after_item_adjustments)
+      // and then apportion invoice-level discounts, shipping, other charges.
       for (const item of currentInvoiceItems) {
-        const itemGross = item.line_total_gross || (item.package_quantity * item.price_per_package_gross) || 0;
-        let apportionedDiscount = 0;
-        let apportionedShipping = 0; 
-        let apportionedOther = 0;    
+        // Ensure cost_after_item_adjustments is present, otherwise fall back to line_total_gross
+        // This field should have been populated when the item was saved via SupplierInvoiceItemForm
+        const baseCostForItemApportionment = item.cost_after_item_adjustments ?? item.line_total_gross ?? 0;
+        
+        let apportionedInvDiscount = 0;
+        let apportionedInvShipping = 0;
+        let apportionedInvOther = 0;
 
-        if (totalGrossOfAllItems > 0) {
-          if (overallDiscountAmount > 0) apportionedDiscount = (itemGross / totalGrossOfAllItems) * overallDiscountAmount;
-          if (overallShippingCost > 0) apportionedShipping = (itemGross / totalGrossOfAllItems) * overallShippingCost;
-          if (overallOtherCharges > 0) apportionedOther = (itemGross / totalGrossOfAllItems) * overallOtherCharges;
+        // Apportion invoice-level adjustments based on the item's *original gross value*
+        // to maintain fairness in distribution, not its already discounted/VATed value.
+        const itemOriginalGross = item.line_total_gross || 0;
+        if (totalGrossOfAllItems > 0 && itemOriginalGross > 0) {
+          if (overallDiscountAmount > 0) apportionedInvDiscount = (itemOriginalGross / totalGrossOfAllItems) * overallDiscountAmount;
+          if (overallShippingCost > 0) apportionedInvShipping = (itemOriginalGross / totalGrossOfAllItems) * overallShippingCost;
+          if (overallOtherCharges > 0) apportionedInvOther = (itemOriginalGross / totalGrossOfAllItems) * overallOtherCharges;
         }
         
-        const lineSubtotalAfterPrimaryApportionment = itemGross - apportionedDiscount + apportionedShipping + apportionedOther;
+        // The subtotal for VAT apportionment starts with the item's cost after its own adjustments,
+        // then applies the apportioned invoice-level (non-VAT) adjustments.
+        const lineSubtotalForVatApportionment = baseCostForItemApportionment - apportionedInvDiscount + apportionedInvShipping + apportionedInvOther;
         
         processedItemsData.push({
-            ...item, // Start with existing item data
-            apportioned_discount_amount: apportionedDiscount,
-            apportioned_shipping_cost: apportionedShipping,
-            apportioned_other_charges: apportionedOther,
-            line_subtotal_after_apportionment: lineSubtotalAfterPrimaryApportionment,
-            // line_total_net and vat_amount_on_line will be calculated in the next step
+            ...item,
+            apportioned_discount_amount: apportionedInvDiscount, // These are INVOICE level apportionments
+            apportioned_shipping_cost: apportionedInvShipping,
+            apportioned_other_charges: apportionedInvOther,
+            line_subtotal_after_apportionment: lineSubtotalForVatApportionment,
+            // item_vat_amount is already on the item from the form.
+            // The vat_amount_on_line in the DB was for the *apportioned invoice VAT*.
+            // We will calculate and store the apportioned invoice VAT separately if needed,
+            // or simply add it to the line_total_net.
         });
-        totalSubtotalOfAllItemsForVATApportion += lineSubtotalAfterPrimaryApportionment;
+        totalSubtotalOfAllItemsForVATApportion += lineSubtotalForVatApportionment;
       }
       
-      // Second pass: apportion VAT and finalize net totals
+      // Second pass: apportion INVOICE-LEVEL VAT and finalize net totals
       const inventoryUpdates: (() => Promise<any>)[] = [];
       const finalItemUpdatesForDB: {id: string, changes: Partial<SupplierInvoiceItem>}[] = [];
 
       for (const processedItem of processedItemsData) {
-        const preVatSubtotal = processedItem.line_subtotal_after_apportionment || 0;
-        let apportionedVat = 0;
+        // processedItem.line_subtotal_after_apportionment already includes item's own VAT (via cost_after_item_adjustments)
+        // and apportioned invoice-level discounts/shipping/other charges.
+        // Now we only need to add the apportioned INVOICE-LEVEL VAT.
+        const subtotalBeforeInvoiceVat = processedItem.line_subtotal_after_apportionment || 0;
+        let apportionedInvoiceVat = 0;
 
         if (overallVatAmount > 0 && totalSubtotalOfAllItemsForVATApportion > 0) {
-          apportionedVat = (preVatSubtotal / totalSubtotalOfAllItemsForVATApportion) * overallVatAmount;
+          // Apportion the INVOICE's total_vat_amount based on the item's subtotal contribution
+          apportionedInvoiceVat = (subtotalBeforeInvoiceVat / totalSubtotalOfAllItemsForVATApportion) * overallVatAmount;
         }
-        const finalItemNet = preVatSubtotal + apportionedVat;
+        
+        // The final net cost for the item includes its own cost (with its own VAT),
+        // plus/minus apportioned invoice-level adjustments, plus apportioned invoice-level VAT.
+        const finalItemNet = subtotalBeforeInvoiceVat + apportionedInvoiceVat;
 
-        console.log(`[ProcessInvoice VAT Apportion] Item: ${processedItem.description_from_invoice}, preVatSubtotal: ${preVatSubtotal}, totalSubtotalForAllItemsForVAT: ${totalSubtotalOfAllItemsForVATApportion}, overallVat: ${overallVatAmount}, apportionedVat: ${apportionedVat}, finalItemNet: ${finalItemNet}`);
+        console.log(`[ProcessInvoice VAT Apportion] Item: ${processedItem.description_from_invoice}, subtotalBeforeInvoiceVat: ${subtotalBeforeInvoiceVat}, totalSubtotalForAllItemsForVAT: ${totalSubtotalOfAllItemsForVATApportion}, overallInvoiceVat: ${overallVatAmount}, apportionedInvoiceVat: ${apportionedInvoiceVat}, finalItemNet: ${finalItemNet}`);
         
         finalItemUpdatesForDB.push({
             id: processedItem.id!,
             changes: {
-                ...processedItem, // Keep previous apportionments
-                vat_amount_on_line: apportionedVat,
+                // Spread processedItem to keep its calculated fields like apportioned_discount_amount etc.
+                // and its original item-specific VAT details.
+                ...processedItem,
+                // The 'vat_amount_on_line' in the schema was for apportioned invoice VAT.
+                // We can store it if needed, or just ensure line_total_net is correct.
+                // For clarity, let's assume the DB field `item_vat_amount` stores item-specific VAT,
+                // and we can add a new field like `apportioned_invoice_vat_amount` if we want to store this explicitly.
+                // Or, as per current schema, `vat_amount_on_line` (now `item_vat_amount`) stores item VAT.
+                // The `line_total_net` is the most critical part.
                 line_total_net: finalItemNet,
                 _last_modified: Date.now(),
                 _synced: 0,
@@ -335,23 +362,32 @@ export default function EditSupplierInvoicePage() {
             });
           }
           await db.supplierInvoiceItems.update(item.id!, {
-            input_inventory_id: undefined, 
-            apportioned_discount_amount: 0, apportioned_shipping_cost: 0, apportioned_other_charges: 0,
-            vat_amount_on_line: 0, // Reset apportioned VAT
-            line_subtotal_after_apportionment: item.line_total_gross, 
-            line_total_net: item.line_total_gross, 
+            input_inventory_id: undefined,
+            item_discount_type: item.item_discount_type, // Keep original item discounts
+            item_discount_value: item.item_discount_value,
+            item_vat_percentage: item.item_vat_percentage,
+            item_vat_amount: item.item_vat_amount,
+            cost_after_item_adjustments: item.cost_after_item_adjustments,
+            apportioned_discount_amount: 0, // Reset INVOICE level apportionments
+            apportioned_shipping_cost: 0,
+            apportioned_other_charges: 0,
+            // line_subtotal_after_apportionment should revert to cost_after_item_adjustments
+            line_subtotal_after_apportionment: item.cost_after_item_adjustments || item.line_total_gross,
+            // line_total_net should also revert to cost_after_item_adjustments
+            line_total_net: item.cost_after_item_adjustments || item.line_total_gross,
             _last_modified: timestamp, _synced: 0,
           });
         }
         
         await db.supplierInvoices.update(invoice.id!, {
-          status: 'pending_processing', 
+          status: 'pending_processing',
+          // Optionally re-calculate invoice totals based on reverted items if needed here
           updated_at: now, _last_modified: timestamp, _synced: 0,
         });
       });
 
       alert("Invoice has been unprocessed. Associated inventory batches were soft-deleted. Please review, make corrections, and re-process or save changes.");
-      fetchInvoiceData(); 
+      fetchInvoiceData();
 
     } catch (err) {
       console.error("Error unprocessing invoice:", err);
@@ -379,8 +415,8 @@ export default function EditSupplierInvoicePage() {
     setIsSaving(true);
     try {
       const now = new Date().toISOString();
-      const lineTotalGross = formData.package_quantity * formData.price_per_package_gross;
-
+      // formData from SupplierInvoiceItemForm now contains more calculated fields
+      
       const itemDataPayload: Partial<Omit<SupplierInvoiceItem, 'id' | 'supplier_invoice_id' | 'created_at' | 'is_deleted'>> = {
         description_from_invoice: formData.description_from_invoice,
         package_quantity: formData.package_quantity,
@@ -388,24 +424,30 @@ export default function EditSupplierInvoicePage() {
         item_quantity_per_package: formData.item_quantity_per_package,
         item_unit_of_measure: formData.item_unit_of_measure,
         price_per_package_gross: formData.price_per_package_gross,
-        line_total_gross: lineTotalGross,
-        line_total_net: formData.line_total_net, // This is preliminary from form (usually gross)
+        line_total_gross: formData.line_total_gross, // From form
+        item_discount_type: formData.item_discount_type,
+        item_discount_value: formData.item_discount_value,
+        item_vat_percentage: formData.item_vat_percentage,
+        item_vat_amount: formData.item_vat_amount, // From form
+        cost_after_item_adjustments: formData.cost_after_item_adjustments, // From form
+        line_total_net: formData.cost_after_item_adjustments, // Preliminary net, will be finalized on process
         notes: formData.notes,
+        // Apportioned amounts are reset/recalculated during process, so initialize to 0 or keep existing if editing before re-process
         apportioned_discount_amount: editingItem?.apportioned_discount_amount || 0,
         apportioned_shipping_cost: editingItem?.apportioned_shipping_cost || 0,
         apportioned_other_charges: editingItem?.apportioned_other_charges || 0,
-        vat_amount_on_line: editingItem?.vat_amount_on_line || 0,
-        line_subtotal_after_apportionment: editingItem?.line_subtotal_after_apportionment || lineTotalGross, // Recalculated on process
+        // This will also be recalculated on process
+        line_subtotal_after_apportionment: editingItem?.line_subtotal_after_apportionment || formData.cost_after_item_adjustments,
         updated_at: now,
         _last_modified: Date.now(),
         _synced: 0,
       };
 
-      if (itemIdToUpdate) { 
+      if (itemIdToUpdate) {
         await db.supplierInvoiceItems.update(itemIdToUpdate, itemDataPayload);
-      } else { 
+      } else {
         const newItemId = crypto.randomUUID();
-        const newItemFull: SupplierInvoiceItem = { 
+        const newItemFull: SupplierInvoiceItem = {
           id: newItemId,
           supplier_invoice_id: invoice.id,
           description_from_invoice: formData.description_from_invoice,
@@ -414,13 +456,17 @@ export default function EditSupplierInvoicePage() {
           item_quantity_per_package: formData.item_quantity_per_package,
           item_unit_of_measure: formData.item_unit_of_measure,
           price_per_package_gross: formData.price_per_package_gross,
-          line_total_gross: lineTotalGross,
-          line_total_net: formData.line_total_net, 
+          line_total_gross: formData.line_total_gross,
+          item_discount_type: formData.item_discount_type,
+          item_discount_value: formData.item_discount_value,
+          item_vat_percentage: formData.item_vat_percentage,
+          item_vat_amount: formData.item_vat_amount,
+          cost_after_item_adjustments: formData.cost_after_item_adjustments,
+          line_total_net: formData.cost_after_item_adjustments, // Preliminary
           apportioned_discount_amount: 0,
           apportioned_shipping_cost: 0,
           apportioned_other_charges: 0,
-          vat_amount_on_line: 0,
-          line_subtotal_after_apportionment: lineTotalGross,
+          line_subtotal_after_apportionment: formData.cost_after_item_adjustments, // Preliminary
           notes: formData.notes,
           created_at: now,
           updated_at: now,
@@ -545,7 +591,7 @@ export default function EditSupplierInvoicePage() {
                   <p className="text-sm text-gray-500">Apportioned Shipping: €{(item.apportioned_shipping_cost || 0).toFixed(2)}</p>
                   <p className="text-sm text-gray-500">Apportioned Other: €{(item.apportioned_other_charges || 0).toFixed(2)}</p>
                   <p className="text-sm text-gray-600">Line Subtotal (after app.): €{(item.line_subtotal_after_apportionment || 0).toFixed(2)}</p>
-                  <p className="text-sm text-gray-500">Apportioned VAT: €{(item.vat_amount_on_line || 0).toFixed(2)}</p>
+                  <p className="text-sm text-gray-500">Item VAT: €{(item.item_vat_amount || 0).toFixed(2)}</p>
                   <p className="text-sm font-semibold text-gray-700">Line Total (Net): €{(item.line_total_net || 0).toFixed(2)}</p>
                 </div>
                 {(invoice?.status === 'draft' || invoice?.status === 'pending_processing') && (

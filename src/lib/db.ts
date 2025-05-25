@@ -378,12 +378,30 @@ export interface SupplierInvoiceItem {
   
   line_total_gross?: number; // package_quantity * price_per_package_gross
   
-  apportioned_discount_amount?: number;
-  apportioned_shipping_cost?: number;
-  apportioned_other_charges?: number;
-  line_subtotal_after_apportionment?: number; // LineTotalGross - ApportionedDiscount + ApportionedShipping + ApportionedOther
-  vat_percentage?: number; 
-  vat_amount_on_line?: number; 
+  // Item-specific discount fields
+  item_discount_type?: 'Percentage' | 'Amount' | ''; // Type of discount applied at the item level
+  item_discount_value?: number; // Value of the item-level discount
+
+  // Cost after item-specific discount and item-specific VAT
+  cost_after_item_adjustments?: number;
+
+  // Apportioned invoice-level costs
+  apportioned_discount_amount?: number; // Apportioned from overall invoice discount
+  apportioned_shipping_cost?: number;   // Apportioned from overall invoice shipping
+  apportioned_other_charges?: number; // Apportioned from overall invoice other charges
+  
+  // Subtotal after item-specific costs AND invoice-level apportionments (excluding invoice-level VAT)
+  line_subtotal_after_apportionment?: number;
+  
+  // Item-specific VAT
+  item_vat_percentage?: number; // VAT percentage applied specifically to this item
+  item_vat_amount?: number; // VAT amount calculated specifically for this item
+  
+  // Note: The overall invoice VAT will be apportioned and added to line_subtotal_after_apportionment
+  // to get the final line_total_net.
+  // The `vat_percentage` and `vat_amount_on_line` fields from the original schema are now
+  // `item_vat_percentage` and `item_vat_amount` respectively.
+
   line_total_net: number; // Final cost for this line item, basis for InputInventory.total_purchase_cost
   notes?: string;
   created_at?: string;
