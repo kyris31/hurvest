@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'; // Removed useEffect, useCallback
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, PlantingLog, InputInventory, PurchasedSeedling } from '@/lib/db'; // Added PurchasedSeedling
+import { db, PlantingLog, InputInventory, PurchasedSeedling, SeedlingProductionLog } from '@/lib/db'; // Added PurchasedSeedling and SeedlingProductionLog
 import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import PlantingLogList from '@/components/PlantingLogList';
 import PlantingLogForm from '@/components/PlantingLogForm';
@@ -80,7 +80,19 @@ export default function PlantingLogsPage() {
     []
   );
 
-  const isLoading = plantingLogs === undefined || seedBatches === undefined || crops === undefined || inputInventory === undefined || purchasedSeedlings === undefined;
+  const seedlingProductionLogs = useLiveQuery(
+    async () => {
+      try {
+        return await db.seedlingProductionLogs.filter(spl => spl.is_deleted === 0).toArray();
+      } catch (err) {
+        console.error("Failed to fetch seedling production logs for PlantingLogsPage:", err);
+        return [];
+      }
+    },
+    []
+  );
+
+  const isLoading = plantingLogs === undefined || seedBatches === undefined || crops === undefined || inputInventory === undefined || purchasedSeedlings === undefined || seedlingProductionLogs === undefined;
 
   const handleFormSubmit = async (data: Omit<PlantingLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | PlantingLog) => {
     setIsSubmitting(true);
@@ -328,13 +340,14 @@ export default function PlantingLogsPage() {
       <div className="mt-4">
         {error && <p className="text-red-500 mb-4 p-3 bg-red-100 rounded-md">{error}</p>}
         {isLoading && <p className="text-center text-gray-500">Loading planting logs...</p>}
-        {!isLoading && !error && plantingLogs && seedBatches && crops && inputInventory && purchasedSeedlings && (
+        {!isLoading && !error && plantingLogs && seedBatches && crops && inputInventory && purchasedSeedlings && seedlingProductionLogs && (
           <PlantingLogList
             plantingLogs={plantingLogs}
             seedBatches={seedBatches}
             crops={crops}
             inputInventory={inputInventory}
             purchasedSeedlings={purchasedSeedlings} // Pass purchasedSeedlings
+            seedlingProductionLogs={seedlingProductionLogs} // Pass seedlingProductionLogs
             onEdit={handleEdit}
             onDelete={handleDelete}
             onMarkCompleted={handleMarkCompleted}

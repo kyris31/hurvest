@@ -1,5 +1,5 @@
 import { db } from './db';
-import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord } from './db'; // Added Flock, FeedLog, FlockRecord
+import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog } from './db'; // Added Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog
 import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
@@ -2803,4 +2803,289 @@ export async function getPoultryFeedEfficiencyData(flockId: string): Promise<Pou
     }
   }
   return reportData;
+}
+// --- Planting Log Reports ---
+
+interface PlantingLogReportItem {
+  plantingDate: string;
+  cropName: string;
+  cropVariety: string;
+  sourceType: string; // e.g., "Seed Batch", "Purchased Seedling", "Self-Produced Seedling", "Direct Input"
+  // sourceDetails: string; // Removed as per user request
+  location: string;
+  quantityPlanted: number;
+  quantityUnit: string;
+  expectedHarvestDate: string;
+  status: string;
+  notes?: string;
+}
+
+async function getCropDetailsForReport(
+  log: PlantingLog,
+  crops: Crop[],
+  seedBatches: SeedBatch[],
+  purchasedSeedlings: PurchasedSeedling[],
+  seedlingProductionLogs: SeedlingProductionLog[]
+): Promise<{ cropName: string; cropVariety: string; sourceType: string }> { // Removed sourceDetails
+  const activeCrops = crops.filter(c => c.is_deleted !== 1);
+
+  if (log.purchased_seedling_id) {
+    const purchasedSeedling = purchasedSeedlings.find(ps => ps.id === log.purchased_seedling_id && ps.is_deleted !== 1);
+    if (purchasedSeedling) {
+      const crop = activeCrops.find(c => c.id === purchasedSeedling.crop_id);
+      return {
+        cropName: crop?.name || purchasedSeedling.name || 'Unknown Purchased Seedling',
+        cropVariety: crop?.variety || 'N/A',
+        sourceType: 'Purchased Seedling',
+        // sourceDetails: purchasedSeedling.name || `ID: ${purchasedSeedling.id.substring(0,8)}`
+      };
+    }
+  } else if (log.seedling_production_log_id) {
+    const prodLog = seedlingProductionLogs.find(spl => spl.id === log.seedling_production_log_id && spl.is_deleted !== 1);
+    if (prodLog) {
+      const crop = activeCrops.find(c => c.id === prodLog.crop_id);
+      let finalCropName = crop?.name;
+      let finalCropVariety = crop?.variety;
+
+      if (!finalCropName && prodLog.seed_batch_id) {
+        const batch = seedBatches.find(b => b.id === prodLog.seed_batch_id && b.is_deleted !== 1);
+        if (batch) {
+          const batchCrop = activeCrops.find(c => c.id === batch.crop_id);
+          finalCropName = batchCrop?.name;
+          finalCropVariety = batchCrop?.variety;
+        }
+      }
+      return {
+        cropName: finalCropName || 'Unknown Self-Produced',
+        cropVariety: finalCropVariety || 'N/A',
+        sourceType: 'Self-Produced Seedling',
+        // sourceDetails: `Sown: ${new Date(prodLog.sowing_date).toLocaleDateString()}${batchDetails}`
+      };
+    }
+  } else if (log.seed_batch_id) {
+    const batch = seedBatches.find(b => b.id === log.seed_batch_id && b.is_deleted !== 1);
+    if (batch) {
+      const crop = activeCrops.find(c => c.id === batch.crop_id);
+      return {
+        cropName: crop?.name || 'Unknown from Seed Batch',
+        cropVariety: crop?.variety || 'N/A',
+        sourceType: 'Seed Batch',
+        // sourceDetails: `Batch: ${batch.batch_code}`
+      };
+    }
+  } else if (log.input_inventory_id) { // Older direct input inventory plantings
+    const invItem = await db.inputInventory.get(log.input_inventory_id); // Assuming direct fetch is okay here
+    if (invItem && invItem.is_deleted !== 1) {
+        const crop = invItem.crop_id ? activeCrops.find(c => c.id === invItem.crop_id) : null;
+        return {
+            cropName: crop?.name || invItem.name,
+            cropVariety: crop?.variety || 'N/A',
+            sourceType: 'Direct Input',
+            // sourceDetails: invItem.name
+        };
+    }
+  }
+  return { cropName: 'N/A', cropVariety: 'N/A', sourceType: 'Unknown' }; // Removed sourceDetails
+}
+
+
+async function getAllPlantingLogsForReport(filters?: DateRangeFilters): Promise<PlantingLogReportItem[]> {
+  let query = db.plantingLogs.filter(pl => pl.is_deleted !== 1);
+
+  if (filters?.startDate) {
+    const start = new Date(filters.startDate).toISOString().split('T')[0];
+    query = query.and(pl => pl.planting_date >= start);
+  }
+  if (filters?.endDate) {
+    const end = new Date(filters.endDate).toISOString().split('T')[0];
+    query = query.and(pl => pl.planting_date <= end);
+  }
+
+  const plantingLogs = await query.sortBy('planting_date');
+
+  const [crops, seedBatches, purchasedSeedlings, seedlingProductionLogs] = await Promise.all([
+    db.crops.filter(c => c.is_deleted !== 1).toArray(),
+    db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
+    db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1).toArray(),
+    db.seedlingProductionLogs.filter(spl => spl.is_deleted !== 1).toArray()
+  ]);
+
+  const reportItems: PlantingLogReportItem[] = [];
+
+  for (const log of plantingLogs) {
+    const cropDetails = await getCropDetailsForReport(log, crops, seedBatches, purchasedSeedlings, seedlingProductionLogs);
+    reportItems.push({
+      plantingDate: new Date(log.planting_date).toLocaleDateString(),
+      cropName: cropDetails.cropName,
+      cropVariety: cropDetails.cropVariety,
+      sourceType: cropDetails.sourceType,
+      // sourceDetails: cropDetails.sourceDetails, // Removed
+      location: log.location_description || 'N/A',
+      quantityPlanted: log.quantity_planted,
+      quantityUnit: log.quantity_unit || 'N/A',
+      expectedHarvestDate: log.expected_harvest_date ? new Date(log.expected_harvest_date).toLocaleDateString() : 'N/A',
+      status: log.status ? log.status.charAt(0).toUpperCase() + log.status.slice(1) : 'Active',
+      notes: log.notes || '',
+    });
+  }
+  return reportItems;
+}
+
+function convertPlantingLogsToCSV(data: PlantingLogReportItem[]): string {
+  if (data.length === 0) return 'No planting log data available for the selected period.';
+  const headers = [
+    "Planting Date", "Crop Name", "Variety", "Source Type", // "Source Details" removed
+    "Location", "Qty Planted", "Unit", "Expected Harvest", "Status", "Notes"
+  ];
+  const csvRows = [headers.join(',')];
+  data.forEach(item => {
+    const row = [
+      `"${item.plantingDate}"`,
+      `"${item.cropName.replace(/"/g, '""')}"`,
+      `"${item.cropVariety.replace(/"/g, '""')}"`,
+      `"${item.sourceType.replace(/"/g, '""')}"`,
+      // `"${item.sourceDetails.replace(/"/g, '""')}"`, // Removed
+      `"${item.location.replace(/"/g, '""')}"`,
+      item.quantityPlanted,
+      `"${item.quantityUnit.replace(/"/g, '""')}"`,
+      `"${item.expectedHarvestDate}"`,
+      `"${item.status.replace(/"/g, '""')}"`,
+      `"${(item.notes || '').replace(/"/g, '""')}"`
+    ];
+    csvRows.push(row.join(','));
+  });
+  return csvRows.join('\\n');
+}
+
+export async function exportPlantingLogsToCSV(filters?: DateRangeFilters): Promise<void> {
+  try {
+    const reportData = await getAllPlantingLogsForReport(filters);
+    const csvData = convertPlantingLogsToCSV(reportData);
+    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    const now = new Date().toISOString().split('T')[0];
+    saveAs(blob, `Hurvesthub_Planting_Logs_Report_${now}.csv`);
+  } catch (error) {
+    console.error("Error exporting planting logs to CSV:", error);
+    alert("Failed to export planting logs to CSV. See console for details.");
+  }
+}
+
+export async function exportPlantingLogsToPDF(filters?: DateRangeFilters): Promise<void> {
+  try {
+    const reportData = await getAllPlantingLogsForReport(filters);
+    if (reportData.length === 0) {
+      alert("No planting log data available for the selected period to generate PDF.");
+      return;
+    }
+
+    const pdfDoc = await PDFDocument.create();
+    await pdfDoc.registerFontkit(fontkit);
+    
+    // Revert to NotoSans and embed like in exportSalesToPDF (no explicit subset option)
+    const fontBytes = await fetch("/fonts/static/NotoSans-Regular.ttf").then(res => res.arrayBuffer());
+    const boldFontBytes = await fetch("/fonts/static/NotoSans-Bold.ttf").then(res => res.arrayBuffer());
+    const mainFont = await pdfDoc.embedFont(fontBytes); // Removed options object
+    const boldFont = await pdfDoc.embedFont(boldFontBytes); // Removed options object
+
+    let page = pdfDoc.addPage();
+    const { width, height } = page.getSize();
+    const margin = 50;
+    const usableWidth = width - 2 * margin;
+    let yPos = { y: height - margin };
+
+    await addPdfHeader(pdfDoc, page, yPos, mainFont, boldFont);
+
+    page.drawText('Planting Logs Report', {
+      x: margin,
+      y: yPos.y,
+      font: boldFont,
+      size: 18,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+    yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title, consistent with Sales Report
+
+    if (filters?.startDate || filters?.endDate) {
+        let dateRangeText = 'Date Range: ';
+        if (filters.startDate) dateRangeText += `${new Date(filters.startDate).toLocaleDateString()}`;
+        dateRangeText += (filters.startDate && filters.endDate) ? ' - ' : '';
+        if (filters.endDate) dateRangeText += `${new Date(filters.endDate).toLocaleDateString()}`;
+        page.drawText(dateRangeText, { x: margin, y: yPos.y, font: mainFont, size: 10, color: rgb(0.3, 0.3, 0.3) });
+        yPos.y -= 20;
+    }
+
+
+    const tableHeaders = ["Date", "Crop", "Variety", "Source", "Location", "Qty", "Unit", "Exp. Harvest", "Status"]; // "Details" removed
+    // Adjusted column widths for 9 columns, aiming for sum ~515
+    const columnWidths = [
+        55, // Date
+        65, // Crop
+        65, // Variety
+        65, // Source
+        // 70, // Details (Removed)
+        60, // Location
+        30, // Qty
+        50, // Unit
+        60, // Exp. Harvest
+        35  // Status
+    ]; // Sum = 515
+
+    const tableData = reportData.map(item => [
+      item.plantingDate,
+      item.cropName,
+      item.cropVariety,
+      item.sourceType,
+      // item.sourceDetails, // Removed
+      item.location,
+      item.quantityPlanted.toString(),
+      item.quantityUnit,
+      item.expectedHarvestDate,
+      item.status,
+      // item.notes // Notes might make rows too tall, consider adding them differently or truncating
+    ]);
+
+    await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, {
+      font: mainFont,
+      boldFont: boldFont,
+      fontSize: 8,
+      headerFontSize: 9,
+      lineHeight: 14, // Explicitly set line height
+      margin: margin,
+    });
+
+    const pdfBytes = await pdfDoc.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const now = new Date();
+    const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const suggestedName = `reports/Hurvesthub_Planting_Logs_Report_${dateStamp}.pdf`;
+    
+    if (typeof window.showSaveFilePicker === 'function') {
+        try {
+            const handle = await window.showSaveFilePicker({
+                suggestedName: suggestedName,
+                types: [{
+                    description: 'PDF Files',
+                    accept: { 'application/pdf': ['.pdf'] },
+                }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+        } catch (err: any) {
+            if (err.name !== 'AbortError') {
+                console.error("Error using showSaveFilePicker for Planting Logs PDF:", err);
+                alert(`Error saving file: ${err.message}. Falling back to direct download.`);
+                saveAs(blob, suggestedName);
+            } else {
+                console.log("Planting Logs PDF save cancelled by user.");
+            }
+        }
+    } else {
+        console.warn("showSaveFilePicker not supported for Planting Logs PDF. Using default saveAs.");
+        saveAs(blob, suggestedName);
+    }
+
+  } catch (error) {
+    console.error("Error exporting planting logs to PDF:", error);
+    alert("Failed to export planting logs to PDF. See console for details.");
+  }
 }

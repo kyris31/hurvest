@@ -21,8 +21,9 @@ import {
     exportSeedSourceDeclarationToCSV,
     exportDetailedInputUsageToPDF,
     exportSeedSourceDeclarationToPDF,
-    getPoultryFeedEfficiencyData // Import new report function
-    // PoultryFeedEfficiencyReportData type will also be needed from reportUtils
+    getPoultryFeedEfficiencyData, // Import new report function
+    exportPlantingLogsToCSV, // Added for Planting Logs
+    exportPlantingLogsToPDF  // Added for Planting Logs
 } from '@/lib/reportUtils';
 import type { PoultryFeedEfficiencyReportData } from '@/lib/reportUtils'; // Import type
 
@@ -384,25 +385,25 @@ export default function ReportsPage() {
             </div>
 
 
-            {/* Example:
-            <div>
+            {/* Planting Log Reports */}
+            <div className="border-t pt-6">
               <h3 className="text-lg font-medium text-gray-700 mb-2">Planting Log Reports</h3>
+              <p className="text-xs text-gray-500 mb-3">Uses the general Start/End Date filters above.</p>
               <div className="flex flex-wrap gap-4">
                 <button
-                  // onClick={exportPlantingLogsToCSV}
+                  onClick={() => handleExportWithDateFilters(exportPlantingLogsToCSV)}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded shadow-sm transition-colors duration-150"
                 >
                   Export Planting Logs (CSV)
                 </button>
                  <button
-                  // onClick={exportPlantingLogsToPDF}
+                  onClick={() => handleExportWithDateFilters(exportPlantingLogsToPDF)}
                   className="bg-pink-600 hover:bg-pink-700 text-white font-semibold py-2 px-4 rounded shadow-sm transition-colors duration-150"
                 >
                   Export Planting Logs (PDF)
                 </button>
               </div>
             </div>
-            */}
           </div>
         </div>
         {/* The stray div and commented buttons below were causing the parsing error. */}

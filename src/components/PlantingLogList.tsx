@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { PlantingLog, SeedBatch, Crop, InputInventory, PurchasedSeedling } from '@/lib/db'; // Added PurchasedSeedling
+import { PlantingLog, SeedBatch, Crop, InputInventory, PurchasedSeedling, SeedlingProductionLog } from '@/lib/db'; // Added PurchasedSeedling and SeedlingProductionLog
 
 interface PlantingLogListProps {
   plantingLogs: PlantingLog[];
@@ -9,6 +9,7 @@ interface PlantingLogListProps {
   crops: Crop[];
   inputInventory: InputInventory[];
   purchasedSeedlings: PurchasedSeedling[]; // Added purchasedSeedlings prop
+  seedlingProductionLogs: SeedlingProductionLog[]; // Added seedlingProductionLogs prop
   onEdit: (log: PlantingLog) => void;
   onDelete: (id: string) => Promise<void>;
   onMarkCompleted: (id: string) => Promise<void>; // New prop
@@ -22,6 +23,7 @@ export default function PlantingLogList({
   crops,
   inputInventory,
   purchasedSeedlings, // Destructure new prop
+  seedlingProductionLogs, // Destructure new prop
   onEdit,
   onDelete,
   onMarkCompleted, // Destructure new prop
@@ -57,9 +59,23 @@ export default function PlantingLogList({
       }
       return { cropName: invItem.name, cropVariety: <span className="text-gray-400">N/A</span> };
     } else if (log.seedling_production_log_id) {
-      // This case needs access to seedlingProductionLogs, which are not currently passed as a prop.
-      // For now, it will likely fall through or need seedlingProductionLogs to be passed.
-      // Or, seedling_production_log should always also have a seed_batch_id or crop_id.
+      const prodLog = seedlingProductionLogs.find(spl => spl.id === log.seedling_production_log_id && spl.is_deleted !== 1);
+      if (!prodLog) return { cropName: <span className="text-red-500">Seedling Prod. Log Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+      
+      // Option 1: Use crop_id directly from SeedlingProductionLog if available and reliable
+      if (prodLog.crop_id) {
+        const crop = activeCrops.find(c => c.id === prodLog.crop_id);
+        if (crop) return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
+        return { cropName: <span className="text-red-500">Crop (from ProdLog) Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+      }
+      // Option 2: Fallback to seed_batch_id from SeedlingProductionLog
+      if (prodLog.seed_batch_id) {
+        const batch = seedBatches.find(b => b.id === prodLog.seed_batch_id && b.is_deleted !== 1);
+        if (!batch) return { cropName: <span className="text-red-500">Batch (from ProdLog) Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+        const crop = activeCrops.find(c => c.id === batch.crop_id);
+        if (!crop) return { cropName: <span className="text-red-500">Crop (from Batch in ProdLog) Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
+        return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
+      }
       return { cropName: <span className="text-orange-500">From Seedling Prod. (Details N/A)</span>, cropVariety: <span className="text-gray-400">N/A</span> };
     }
     
