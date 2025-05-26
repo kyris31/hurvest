@@ -4,83 +4,34 @@ import React from 'react';
 import { PlantingLog, SeedBatch, Crop, InputInventory, PurchasedSeedling, SeedlingProductionLog } from '@/lib/db'; // Added PurchasedSeedling and SeedlingProductionLog
 
 interface PlantingLogListProps {
-  plantingLogs: PlantingLog[];
-  seedBatches: SeedBatch[];
-  crops: Crop[];
-  inputInventory: InputInventory[];
-  purchasedSeedlings: PurchasedSeedling[]; // Added purchasedSeedlings prop
-  seedlingProductionLogs: SeedlingProductionLog[]; // Added seedlingProductionLogs prop
+  plantingLogs: (PlantingLog & { cropNameForSort: string; cropVarietyForSort: string })[];
+  // seedBatches: SeedBatch[]; // Removed
+  // crops: Crop[]; // Removed
+  // inputInventory: InputInventory[]; // Removed
+  // purchasedSeedlings: PurchasedSeedling[]; // Removed
+  // seedlingProductionLogs: SeedlingProductionLog[]; // Removed
   onEdit: (log: PlantingLog) => void;
   onDelete: (id: string) => Promise<void>;
-  onMarkCompleted: (id: string) => Promise<void>; // New prop
+  onMarkCompleted: (id: string) => Promise<void>;
   isDeleting: string | null;
-  isCompleting: string | null; // New prop
+  isCompleting: string | null;
 }
 
 export default function PlantingLogList({
   plantingLogs,
-  seedBatches,
-  crops,
-  inputInventory,
-  purchasedSeedlings, // Destructure new prop
-  seedlingProductionLogs, // Destructure new prop
+  // seedBatches, // Removed
+  // crops, // Removed
+  // inputInventory, // Removed
+  // purchasedSeedlings, // Removed
+  // seedlingProductionLogs, // Removed
   onEdit,
   onDelete,
-  onMarkCompleted, // Destructure new prop
+  onMarkCompleted,
   isDeleting,
-  isCompleting // Destructure new prop
+  isCompleting
 }: PlantingLogListProps) {
 
-  const getCropDetails = (log: PlantingLog) => {
-    const activeCrops = crops.filter(c => c.is_deleted !== 1);
-
-    if (log.purchased_seedling_id) {
-      const purchasedSeedling = purchasedSeedlings.find(ps => ps.id === log.purchased_seedling_id && ps.is_deleted !== 1);
-      if (purchasedSeedling?.crop_id) {
-        const crop = activeCrops.find(c => c.id === purchasedSeedling.crop_id);
-        if (crop) return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
-        return { cropName: <span className="text-red-500">Crop for Purchased Seedling Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-      }
-      // If purchased seedling has no crop_id, use its name.
-      return { cropName: purchasedSeedling?.name || <span className="text-red-500">Unknown Purchased Seedling</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-    } else if (log.seed_batch_id) {
-      const batch = seedBatches.find(b => b.id === log.seed_batch_id && b.is_deleted !== 1);
-      if (!batch) return { cropName: <span className="text-red-500">Unknown Seed Batch</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-      const crop = activeCrops.find(c => c.id === batch.crop_id);
-      if (!crop) return { cropName: <span className="text-red-500">Crop for Seed Batch Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-      return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
-    } else if (log.input_inventory_id) { // Fallback for older direct input inventory plantings (if any)
-      const invItem = inputInventory.find(ii => ii.id === log.input_inventory_id && ii.is_deleted !== 1);
-      if (!invItem) return { cropName: <span className="text-red-500">Unknown Inventory Item</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-      if (invItem.crop_id) {
-        const crop = activeCrops.find(c => c.id === invItem.crop_id);
-        if (!crop) return { cropName: <span className="text-red-500">Crop for Inventory Item Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-        return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
-      }
-      return { cropName: invItem.name, cropVariety: <span className="text-gray-400">N/A</span> };
-    } else if (log.seedling_production_log_id) {
-      const prodLog = seedlingProductionLogs.find(spl => spl.id === log.seedling_production_log_id && spl.is_deleted !== 1);
-      if (!prodLog) return { cropName: <span className="text-red-500">Seedling Prod. Log Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-      
-      // Option 1: Use crop_id directly from SeedlingProductionLog if available and reliable
-      if (prodLog.crop_id) {
-        const crop = activeCrops.find(c => c.id === prodLog.crop_id);
-        if (crop) return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
-        return { cropName: <span className="text-red-500">Crop (from ProdLog) Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-      }
-      // Option 2: Fallback to seed_batch_id from SeedlingProductionLog
-      if (prodLog.seed_batch_id) {
-        const batch = seedBatches.find(b => b.id === prodLog.seed_batch_id && b.is_deleted !== 1);
-        if (!batch) return { cropName: <span className="text-red-500">Batch (from ProdLog) Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-        const crop = activeCrops.find(c => c.id === batch.crop_id);
-        if (!crop) return { cropName: <span className="text-red-500">Crop (from Batch in ProdLog) Not Found</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-        return { cropName: crop.name, cropVariety: crop.variety || <span className="text-gray-400">N/A</span> };
-      }
-      return { cropName: <span className="text-orange-500">From Seedling Prod. (Details N/A)</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-    }
-    
-    return { cropName: <span className="text-gray-400">N/A</span>, cropVariety: <span className="text-gray-400">N/A</span> };
-  };
+  // const getCropDetails = (log: PlantingLog) => { ... }; // Removed
 
   const activePlantingLogs = plantingLogs.filter(log => log.is_deleted !== 1);
 
@@ -107,7 +58,9 @@ export default function PlantingLogList({
         </thead>
         <tbody className="text-gray-700">
           {activePlantingLogs.map((log) => {
-            const { cropName, cropVariety } = getCropDetails(log); // Pass the whole log object
+            // const { cropName, cropVariety } = getCropDetails(log); // Use pre-enriched data
+            const cropName = log.cropNameForSort;
+            const cropVariety = log.cropVarietyForSort || <span className="text-gray-400">N/A</span>;
             return (
               <tr key={log.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
                 <td className="py-3 px-5">{new Date(log.planting_date).toLocaleDateString()}</td>

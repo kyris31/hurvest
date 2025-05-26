@@ -83,6 +83,31 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
   
   const isLoading = seedBatches === undefined || crops === undefined || suppliers === undefined;
 
+  const sortedAndEnrichedSeedBatches = React.useMemo(() => {
+    if (!seedBatches || !crops) return [];
+    
+    const cropsMap = new Map(crops.map(crop => [crop.id, crop]));
+    
+    const enriched = seedBatches.map(batch => ({
+      ...batch,
+      cropName: cropsMap.get(batch.crop_id)?.name || 'Unknown Crop',
+      cropVariety: cropsMap.get(batch.crop_id)?.variety || '',
+    }));
+
+    return enriched.sort((a, b) => {
+      const nameA = a.cropName.toLowerCase();
+      const nameB = b.cropName.toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      // If crop names are the same, sort by batch code
+      const batchCodeA = a.batch_code.toLowerCase();
+      const batchCodeB = b.batch_code.toLowerCase();
+      if (batchCodeA < batchCodeB) return -1;
+      if (batchCodeA > batchCodeB) return 1;
+      return 0;
+    });
+  }, [seedBatches, crops]);
+
   // This useEffect is no longer needed
   // useEffect(() => {
   //   console.log("SeedBatchesPage: fetchData triggered by syncCounter or initial load.", syncCounter);
@@ -245,17 +270,17 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
       <div className="mt-4">
         {error && <p className="text-red-500 mb-4 p-3 bg-red-100 rounded-md">{error}</p>}
         {isLoading && <p className="text-center text-gray-500">Loading seed batches...</p>}
-        {!isLoading && !error && seedBatches && crops && suppliers && (
+        {!isLoading && !error && sortedAndEnrichedSeedBatches && suppliers && (
           <SeedBatchList
-            seedBatches={seedBatches}
-            crops={crops}
-            suppliers={suppliers} // Pass suppliers to the list
+            seedBatches={sortedAndEnrichedSeedBatches}
+            // crops={crops} // No longer needed as seedBatches are pre-enriched
+            suppliers={suppliers}
             onEdit={handleEdit}
             onDelete={handleDelete}
             isDeleting={isDeleting}
           />
         )}
-        {!isLoading && seedBatches && crops && suppliers && seedBatches.length === 0 && !error && (
+        {!isLoading && sortedAndEnrichedSeedBatches && suppliers && sortedAndEnrichedSeedBatches.length === 0 && !error && (
            <div className="text-center py-10">
             <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>

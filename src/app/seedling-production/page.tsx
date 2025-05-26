@@ -25,29 +25,57 @@ export default function SeedlingProductionPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const allLogs = await db.seedlingProductionLogs.where('is_deleted').notEqual(1).reverse().sortBy('sowing_date');
-      const enrichedLogs: EnrichedSeedlingProductionLog[] = [];
+      // Fetch all necessary data upfront
+      const [allLogsRaw, allCropsData, allSeedBatchesData] = await Promise.all([
+        db.seedlingProductionLogs.where('is_deleted').notEqual(1).toArray(),
+        db.crops.filter(c => c.is_deleted !== 1).toArray(),
+        db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray()
+      ]);
 
-      for (const log of allLogs) {
+      const cropsMap = new Map(allCropsData.map(crop => [crop.id, crop]));
+      const seedBatchesMap = new Map(allSeedBatchesData.map(sb => [sb.id, sb]));
+
+      const enrichedLogs: EnrichedSeedlingProductionLog[] = allLogsRaw.map(log => {
         let cropName = 'N/A';
         let cropVariety = '';
         let seedBatchCode = 'N/A';
 
+        const cropFromLog = log.crop_id ? cropsMap.get(log.crop_id) : undefined;
+
+        if (cropFromLog) {
+            cropName = cropFromLog.name;
+            cropVariety = cropFromLog.variety || '';
+        }
+
         if (log.seed_batch_id) {
-          const seedBatch = await db.seedBatches.get(log.seed_batch_id);
+          const seedBatch = seedBatchesMap.get(log.seed_batch_id);
           if (seedBatch) {
             seedBatchCode = seedBatch.batch_code;
-            if (seedBatch.crop_id) {
-              const crop = await db.crops.get(seedBatch.crop_id);
-              if (crop) {
-                cropName = crop.name;
-                cropVariety = crop.variety || '';
+            // If cropName is still N/A, try to get it from seedBatch's crop_id
+            if (cropName === 'N/A' && seedBatch.crop_id) {
+              const cropFromBatch = cropsMap.get(seedBatch.crop_id);
+              if (cropFromBatch) {
+                cropName = cropFromBatch.name;
+                cropVariety = cropFromBatch.variety || '';
               }
             }
           }
         }
-        enrichedLogs.push({ ...log, cropName, cropVariety, seedBatchCode });
-      }
+        return { ...log, cropName, cropVariety, seedBatchCode };
+      });
+
+      // Sort enrichedLogs alphabetically by cropName, then by sowing_date descending
+      enrichedLogs.sort((a, b) => {
+        const nameA = (a.cropName || '').toLowerCase();
+        const nameB = (b.cropName || '').toLowerCase();
+        if (nameA < nameB) return -1;
+        if (nameA > nameB) return 1;
+        
+        const dateA = new Date(a.sowing_date).getTime();
+        const dateB = new Date(b.sowing_date).getTime();
+        return dateB - dateA; // Newest first for same crop name
+      });
+
       setLogs(enrichedLogs);
     } catch (err) {
       console.error("Failed to fetch seedling production logs:", err);

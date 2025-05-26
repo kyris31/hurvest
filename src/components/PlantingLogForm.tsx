@@ -59,6 +59,17 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
           const crop = cropsMap.get(sl.crop_id);
           return { ...sl, cropName: crop?.name || 'Unknown Crop' };
         });
+        // Sort enrichedSeedlingLogs alphabetically by cropName, then by sowing_date descending
+        enrichedSeedlingLogs.sort((a, b) => {
+          const nameA = a.cropName.toLowerCase();
+          const nameB = b.cropName.toLowerCase();
+          if (nameA < nameB) return -1;
+          if (nameA > nameB) return 1;
+          // If crop names are the same, sort by sowing date (newest first)
+          const dateA = new Date(a.sowing_date).getTime();
+          const dateB = new Date(b.sowing_date).getTime();
+          return dateB - dateA; // Descending
+        });
         setAvailableSeedlingLogs(enrichedSeedlingLogs);
 
         const enrichedPurchasedSeedlings = purchasedSeedlingsData.map(ps => {

@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react'; // Removed useEffect, useCallback
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, PlantingLog, InputInventory, PurchasedSeedling, SeedlingProductionLog } from '@/lib/db'; // Added PurchasedSeedling and SeedlingProductionLog
+import { db, PlantingLog, InputInventory, PurchasedSeedling, SeedlingProductionLog, Crop, SeedBatch } from '@/lib/db'; // Added Crop, SeedBatch
 import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import PlantingLogList from '@/components/PlantingLogList';
 import PlantingLogForm from '@/components/PlantingLogForm';
@@ -93,6 +93,96 @@ export default function PlantingLogsPage() {
   );
 
   const isLoading = plantingLogs === undefined || seedBatches === undefined || crops === undefined || inputInventory === undefined || purchasedSeedlings === undefined || seedlingProductionLogs === undefined;
+
+  // Helper function to get crop details for sorting and enrichment
+  // This is adapted from PlantingLogList's getCropDetails
+  const getPlantingLogCropInfo = (
+    log: PlantingLog,
+    allCrops: Crop[],
+    allSeedBatches: SeedBatch[],
+    allPurchasedSeedlings: PurchasedSeedling[],
+    allSeedlingProductionLogs: SeedlingProductionLog[]
+  ): { cropNameStr: string; cropVarietyStr: string } => {
+    const activeCrops = allCrops.filter(c => c.is_deleted !== 1);
+
+    if (log.purchased_seedling_id) {
+      const purchasedSeedling = allPurchasedSeedlings.find(ps => ps.id === log.purchased_seedling_id && ps.is_deleted !== 1);
+      if (purchasedSeedling?.crop_id) {
+        const crop = activeCrops.find(c => c.id === purchasedSeedling.crop_id);
+        if (crop) return { cropNameStr: crop.name, cropVarietyStr: crop.variety || '' };
+        return { cropNameStr: "Error: Crop for PS Not Found", cropVarietyStr: '' };
+      }
+      return { cropNameStr: purchasedSeedling?.name || "Unknown Purchased Seedling", cropVarietyStr: '' };
+    } else if (log.seedling_production_log_id) {
+      const prodLog = allSeedlingProductionLogs.find(spl => spl.id === log.seedling_production_log_id && spl.is_deleted !== 1);
+      if (prodLog?.crop_id) {
+        const crop = activeCrops.find(c => c.id === prodLog.crop_id);
+        if (crop) return { cropNameStr: crop.name, cropVarietyStr: crop.variety || '' };
+      }
+      // Fallback to seed batch if crop_id on prodLog is missing or doesn't resolve
+      if (prodLog?.seed_batch_id) {
+        const batch = allSeedBatches.find(b => b.id === prodLog.seed_batch_id && b.is_deleted !== 1);
+        if (batch?.crop_id) {
+          const crop = activeCrops.find(c => c.id === batch.crop_id);
+          if (crop) return { cropNameStr: crop.name, cropVarietyStr: crop.variety || '' };
+        }
+      }
+      return { cropNameStr: "From Seedling Prod. (Error)", cropVarietyStr: '' };
+    } else if (log.seed_batch_id) {
+      const batch = allSeedBatches.find(b => b.id === log.seed_batch_id && b.is_deleted !== 1);
+      if (batch?.crop_id) {
+        const crop = activeCrops.find(c => c.id === batch.crop_id);
+        if (crop) return { cropNameStr: crop.name, cropVarietyStr: crop.variety || '' };
+        return { cropNameStr: "Error: Crop for SB Not Found", cropVarietyStr: '' };
+      }
+      return { cropNameStr: "Unknown Seed Batch Source", cropVarietyStr: '' };
+    } else if (log.input_inventory_id) {
+      // This case would require fetching the specific inputInventory item,
+      // or having allInputInventory passed and searching here.
+      // For simplicity in this sorting context, we might display its direct name if available or mark as generic.
+      // The PlantingLogList component already handles this display logic more robustly.
+      // Here, we primarily need a sortable name.
+      const invItem = inputInventory?.find(ii => ii.id === log.input_inventory_id && ii.is_deleted !== 1);
+       if (invItem?.crop_id && crops) {
+         const crop = activeCrops.find(c => c.id === invItem.crop_id);
+         if (crop) return { cropNameStr: crop.name, cropVarietyStr: crop.variety || ''};
+       }
+      return { cropNameStr: invItem?.name || "Direct Input Item", cropVarietyStr: '' };
+    }
+    return { cropNameStr: "N/A", cropVarietyStr: "N/A" };
+  };
+
+
+  const sortedAndEnrichedPlantingLogs = React.useMemo(() => {
+    if (!plantingLogs || !crops || !seedBatches || !purchasedSeedlings || !seedlingProductionLogs || !inputInventory) return [];
+
+    const enriched = plantingLogs.map(log => {
+      const { cropNameStr, cropVarietyStr } = getPlantingLogCropInfo(
+        log,
+        crops,
+        seedBatches,
+        purchasedSeedlings,
+        seedlingProductionLogs
+      );
+      return {
+        ...log,
+        cropNameForSort: cropNameStr, // Add new property for sorting
+        cropVarietyForSort: cropVarietyStr, // Add new property for display
+      };
+    });
+
+    return enriched.sort((a, b) => {
+      const nameA = a.cropNameForSort.toLowerCase();
+      const nameB = b.cropNameForSort.toLowerCase();
+      if (nameA < nameB) return -1;
+      if (nameA > nameB) return 1;
+      // If crop names are the same, sort by planting date (newest first)
+      const dateA = new Date(a.planting_date).getTime();
+      const dateB = new Date(b.planting_date).getTime();
+      return dateB - dateA;
+    });
+  }, [plantingLogs, crops, seedBatches, purchasedSeedlings, seedlingProductionLogs, inputInventory]);
+
 
   const handleFormSubmit = async (data: Omit<PlantingLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | PlantingLog) => {
     setIsSubmitting(true);
@@ -340,14 +430,14 @@ export default function PlantingLogsPage() {
       <div className="mt-4">
         {error && <p className="text-red-500 mb-4 p-3 bg-red-100 rounded-md">{error}</p>}
         {isLoading && <p className="text-center text-gray-500">Loading planting logs...</p>}
-        {!isLoading && !error && plantingLogs && seedBatches && crops && inputInventory && purchasedSeedlings && seedlingProductionLogs && (
+        {!isLoading && !error && sortedAndEnrichedPlantingLogs && (
           <PlantingLogList
-            plantingLogs={plantingLogs}
-            seedBatches={seedBatches}
-            crops={crops}
-            inputInventory={inputInventory}
-            purchasedSeedlings={purchasedSeedlings} // Pass purchasedSeedlings
-            seedlingProductionLogs={seedlingProductionLogs} // Pass seedlingProductionLogs
+            plantingLogs={sortedAndEnrichedPlantingLogs} // Pass sorted and enriched logs
+            // seedBatches={seedBatches} // No longer needed
+            // crops={crops} // No longer needed
+            // inputInventory={inputInventory} // No longer needed
+            // purchasedSeedlings={purchasedSeedlings} // No longer needed
+            // seedlingProductionLogs={seedlingProductionLogs} // No longer needed
             onEdit={handleEdit}
             onDelete={handleDelete}
             onMarkCompleted={handleMarkCompleted}
@@ -355,7 +445,7 @@ export default function PlantingLogsPage() {
             isCompleting={isCompleting}
           />
         )}
-        {!isLoading && plantingLogs && plantingLogs.length === 0 && !error && (
+        {!isLoading && sortedAndEnrichedPlantingLogs && sortedAndEnrichedPlantingLogs.length === 0 && !error && (
            <div className="text-center py-10">
             <svg className="mx-auto h-12 w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.53 16.122a3 3 0 00-5.78 1.128 2.25 2.25 0 01-2.4 2.245M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />

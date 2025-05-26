@@ -5,15 +5,15 @@ import { SeedBatch, Crop, Supplier } from '@/lib/db'; // Added Supplier
 import { QRCodeCanvas } from 'qrcode.react';
 
 interface SeedBatchListProps {
-  seedBatches: (SeedBatch & { cropName?: string })[];
-  crops: Crop[];
-  suppliers: Supplier[]; // Added suppliers prop
+  seedBatches: (SeedBatch & { cropName: string; cropVariety?: string })[]; // cropName is now guaranteed, cropVariety is optional
+  // crops: Crop[]; // No longer needed as data is pre-enriched
+  suppliers: Supplier[];
   onEdit: (seedBatch: SeedBatch) => void;
   onDelete: (id: string) => Promise<void>;
   isDeleting: string | null;
 }
 
-export default function SeedBatchList({ seedBatches, crops, suppliers, onEdit, onDelete, isDeleting }: SeedBatchListProps) {
+export default function SeedBatchList({ seedBatches, suppliers, onEdit, onDelete, isDeleting }: SeedBatchListProps) {
   
   // Create a map for quick supplier lookup
   const supplierMap = React.useMemo(() =>
@@ -21,10 +21,10 @@ export default function SeedBatchList({ seedBatches, crops, suppliers, onEdit, o
     [suppliers]
   );
 
-  const getCropDetails = (cropId: string): { name: string; variety?: string } => {
-    const crop = crops.find(c => c.id === cropId && c.is_deleted !== 1);
-    return crop ? { name: crop.name, variety: crop.variety } : { name: 'Unknown Crop' };
-  };
+  // const getCropDetails = (cropId: string): { name: string; variety?: string } => {
+  //   const crop = crops.find(c => c.id === cropId && c.is_deleted !== 1);
+  //   return crop ? { name: crop.name, variety: crop.variety } : { name: 'Unknown Crop' };
+  // };
 
   const activeSeedBatches = seedBatches.filter(batch => batch.is_deleted !== 1);
 
@@ -55,14 +55,14 @@ export default function SeedBatchList({ seedBatches, crops, suppliers, onEdit, o
         </thead>
         <tbody className="text-gray-700">
           {activeSeedBatches.map((batch) => {
-            const cropDetails = getCropDetails(batch.crop_id);
+            // const cropDetails = getCropDetails(batch.crop_id); // Use pre-enriched data
             const supplierName = batch.supplier_id ? supplierMap.get(batch.supplier_id) : null;
             return (
               <tr key={batch.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
                 <td className="py-3 px-5">{batch.batch_code}</td>
                 <td className="py-3 px-5">
-                  {cropDetails.name}
-                  {cropDetails.variety && <span className="text-xs text-gray-500 ml-1">({cropDetails.variety})</span>}
+                  {batch.cropName}
+                  {batch.cropVariety && <span className="text-xs text-gray-500 ml-1">({batch.cropVariety})</span>}
                 </td>
                 <td className="py-3 px-5">{supplierName || <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5">{batch.purchase_date ? new Date(batch.purchase_date).toLocaleDateString() : <span className="text-gray-400">N/A</span>}</td>
