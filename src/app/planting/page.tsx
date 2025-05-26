@@ -172,11 +172,12 @@ export default function PlantingLogsPage() {
     });
 
     return enriched.sort((a, b) => {
-      const nameA = a.cropNameForSort.toLowerCase();
-      const nameB = b.cropNameForSort.toLowerCase();
-      if (nameA < nameB) return -1;
-      if (nameA > nameB) return 1;
-      // If crop names are the same, sort by planting date (newest first)
+      // Primary sort: cropNameForSort, locale-sensitive
+      const nameComparison = (a.cropNameForSort || '').localeCompare(b.cropNameForSort || '', undefined, { sensitivity: 'base' });
+      if (nameComparison !== 0) {
+        return nameComparison;
+      }
+      // Secondary sort: planting_date (newest first)
       const dateA = new Date(a.planting_date).getTime();
       const dateB = new Date(b.planting_date).getTime();
       return dateB - dateA;

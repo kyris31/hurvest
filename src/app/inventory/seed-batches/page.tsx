@@ -95,16 +95,13 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
     }));
 
     return enriched.sort((a, b) => {
-      const nameA = a.cropName.toLowerCase();
-      const nameB = b.cropName.toLowerCase();
-      if (nameA < nameB) return -1;
-      if (nameA > nameB) return 1;
-      // If crop names are the same, sort by batch code
-      const batchCodeA = a.batch_code.toLowerCase();
-      const batchCodeB = b.batch_code.toLowerCase();
-      if (batchCodeA < batchCodeB) return -1;
-      if (batchCodeA > batchCodeB) return 1;
-      return 0;
+      // Primary sort: cropName, locale-sensitive
+      const nameComparison = (a.cropName || '').localeCompare(b.cropName || '', undefined, { sensitivity: 'base' });
+      if (nameComparison !== 0) {
+        return nameComparison;
+      }
+      // Secondary sort: batch_code, locale-sensitive
+      return (a.batch_code || '').localeCompare(b.batch_code || '', undefined, { sensitivity: 'base' });
     });
   }, [seedBatches, crops]);
 

@@ -64,13 +64,14 @@ export default function SeedlingProductionPage() {
         return { ...log, cropName, cropVariety, seedBatchCode };
       });
 
-      // Sort enrichedLogs alphabetically by cropName, then by sowing_date descending
+      // Sort enrichedLogs alphabetically by cropName (locale-sensitive), then by sowing_date descending
       enrichedLogs.sort((a, b) => {
-        const nameA = (a.cropName || '').toLowerCase();
-        const nameB = (b.cropName || '').toLowerCase();
-        if (nameA < nameB) return -1;
-        if (nameA > nameB) return 1;
-        
+        // Primary sort: cropName, locale-sensitive
+        const nameComparison = (a.cropName || '').localeCompare(b.cropName || '', undefined, { sensitivity: 'base' });
+        if (nameComparison !== 0) {
+          return nameComparison;
+        }
+        // Secondary sort: sowing_date (newest first)
         const dateA = new Date(a.sowing_date).getTime();
         const dateB = new Date(b.sowing_date).getTime();
         return dateB - dateA; // Newest first for same crop name
