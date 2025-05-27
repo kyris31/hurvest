@@ -1,14 +1,16 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react'; // Removed useCallback
 import { useSearchParams, useRouter } from 'next/navigation'; // For query params
+import { useLiveQuery } from 'dexie-react-hooks'; // Import useLiveQuery
 import { db, Tree } from '@/lib/db';
+import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
 import TreeList from '@/components/TreeList';
 import TreeForm from '@/components/TreeForm';
 
 export default function TreesPage() {
-  const [trees, setTrees] = useState<Tree[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // const [trees, setTrees] = useState<Tree[]>([]); // Replaced with useLiveQuery
+  // const [isLoading, setIsLoading] = useState(true); // isLoading will be based on trees from useLiveQuery
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [editingTree, setEditingTree] = useState<Tree | null>(null);
@@ -25,23 +27,24 @@ export default function TreesPage() {
     }
   }, [searchParams]);
 
-  const fetchData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const treesData = await db.trees.orderBy('identifier').filter(t => t.is_deleted !== 1).toArray();
-      setTrees(treesData);
-      setError(null);
-    } catch (err) {
-      console.error("Failed to fetch trees data:", err);
-      setError("Failed to load tree data. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  // const fetchData = useCallback(async () => { ... }, []); // Removed
+  // useEffect(() => { fetchData(); }, [fetchData]); // Removed
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  const trees = useLiveQuery(
+    async () => {
+      try {
+        setError(null); // Clear previous errors
+        return await db.trees.orderBy('identifier').filter(t => t.is_deleted !== 1).toArray();
+      } catch (err) {
+        console.error("Failed to fetch trees data with useLiveQuery:", err);
+        setError("Failed to load tree data. Please try again.");
+        return []; // Return empty array on error
+      }
+    },
+    [] // Dependencies for the query
+  );
+
+  const isLoading = trees === undefined; //isLoading is true if trees data hasn't been loaded yet
 
   const handleFormSubmit = async (data: Omit<Tree, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | Tree) => {
     setIsSubmitting(true);
@@ -69,11 +72,23 @@ export default function TreesPage() {
         const id = crypto.randomUUID();
         await db.trees.add({ ...newTreeData, id });
       }
-      await fetchData();
+      // await fetchData(); // No longer needed, useLiveQuery handles updates
       setShowForm(false);
       setEditingTree(null);
       if (searchParams.get('action') === 'add') {
         router.replace('/trees', undefined); // Clear query param
+      }
+      // After successful local save, request a push to the server
+      try {
+        console.log("TreesPage: Push requesting after form submit...");
+        const pushResult = await requestPushChanges();
+        if (pushResult.success) {
+          console.log("TreesPage: Push requested successfully after form submit.");
+        } else {
+          console.error("TreesPage: Push request failed after form submit.", pushResult.errors);
+        }
+      } catch (syncError) {
+        console.error("Error requesting push after tree save:", syncError);
       }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to save tree. Please try again.";
@@ -96,7 +111,7 @@ export default function TreesPage() {
       setError(null);
       try {
         await db.markForSync('trees', id, {}, true);
-        await fetchData();
+        // await fetchData(); // No longer needed, useLiveQuery handles updates
       } catch (err) {
         console.error("Failed to delete tree:", err);
         setError("Failed to delete tree.");

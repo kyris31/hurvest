@@ -53,6 +53,16 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
           const crop = cropsMap.get(batch.crop_id);
           return { ...batch, cropDetails: crop };
         });
+        // Sort enrichedBatches alphabetically by crop name, then by batch_code
+        enrichedBatches.sort((a, b) => {
+          const cropNameA = a.cropDetails?.name || '';
+          const cropNameB = b.cropDetails?.name || '';
+          const nameComparison = cropNameA.localeCompare(cropNameB, undefined, { sensitivity: 'base' });
+          if (nameComparison !== 0) {
+            return nameComparison;
+          }
+          return (a.batch_code || '').localeCompare(b.batch_code || '', undefined, { sensitivity: 'base' });
+        });
         setAvailableSeedBatches(enrichedBatches);
 
         const enrichedSeedlingLogs = seedlingLogsData.map(sl => {
