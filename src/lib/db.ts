@@ -243,7 +243,8 @@ export interface CultivationLog {
 
 export interface HarvestLog {
   id: string; // UUID
-  planting_log_id: string;
+  planting_log_id?: string; // Made optional
+  tree_id?: string; // Added for harvests from trees
   harvest_date: string;
   quantity_harvested: number;
   current_quantity_available?: number; // Added to track remaining stock from this harvest

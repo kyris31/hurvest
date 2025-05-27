@@ -1,47 +1,37 @@
 'use client';
 
 import React from 'react';
-import { HarvestLog, PlantingLog, SeedBatch, Crop } from '@/lib/db';
+import { HarvestLog, Tree } from '@/lib/db'; // Removed PlantingLog, SeedBatch, Crop as direct props
 
-interface HarvestLogListProps {
-  harvestLogs: HarvestLog[];
-  plantingLogs: PlantingLog[];
-  seedBatches: SeedBatch[];
-  crops: Crop[];
-  onEdit: (log: HarvestLog) => void;
-  onDelete: (id: string) => Promise<void>;
-  isDeleting: string | null; 
+// Define the structure of the enriched harvest log item
+interface EnrichedHarvestLog extends HarvestLog {
+  plantingLogDetails?: any; // Or a more specific type if defined for enriched planting log info
+  treeDetails?: Tree;
+  sourceDisplay: string;
+  varietyDisplay: string;
 }
 
-export default function HarvestLogList({ 
-  harvestLogs, 
-  plantingLogs, 
-  seedBatches, 
-  crops, 
-  onEdit, 
-  onDelete, 
-  isDeleting 
+interface HarvestLogListProps {
+  harvestLogs: EnrichedHarvestLog[]; // Expect enriched logs
+  // plantingLogs: PlantingLog[]; // Removed
+  // seedBatches: SeedBatch[]; // Removed
+  // crops: Crop[]; // Removed
+  onEdit: (log: HarvestLog) => void; // Still pass original HarvestLog type for editing
+  onDelete: (id: string) => Promise<void>;
+  isDeleting: string | null;
+}
+
+export default function HarvestLogList({
+  harvestLogs,
+  // plantingLogs, // Removed
+  // seedBatches, // Removed
+  // crops, // Removed
+  onEdit,
+  onDelete,
+  isDeleting
 }: HarvestLogListProps) {
 
-  const getPlantingLogInfo = (plantingLogId: string) => {
-    const activePlantingLogs = plantingLogs.filter(pl => pl.is_deleted !== 1);
-    const activeSeedBatches = seedBatches.filter(sb => sb.is_deleted !== 1);
-    const activeCrops = crops.filter(c => c.is_deleted !== 1);
-
-    const pLog = activePlantingLogs.find(pl => pl.id === plantingLogId);
-    if (!pLog) return 'Unknown/Deleted Planting Log';
-    let cropName = 'N/A';
-    if (pLog.seed_batch_id) {
-      const sBatch = activeSeedBatches.find(sb => sb.id === pLog.seed_batch_id);
-      if (sBatch) {
-        const crop = activeCrops.find(c => c.id === sBatch.crop_id);
-        if (crop) cropName = crop.name;
-      } else {
-        cropName = 'Unknown/Deleted Crop (from Batch)';
-      }
-    }
-    return `${new Date(pLog.planting_date).toLocaleDateString()} - ${cropName} (${pLog.location_description || 'N/A'})`;
-  };
+  // const getPlantingLogInfo = (plantingLogId: string) => { ... }; // Removed
 
   const activeHarvestLogs = harvestLogs.filter(log => log.is_deleted !== 1);
 
@@ -55,7 +45,7 @@ export default function HarvestLogList({
         <thead className="bg-green-600 text-white">
           <tr>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Harvest Date</th>
-            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Planting Log (Crop - Location)</th>
+            <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Source (Crop/Tree - Variety)</th>
             <th className="text-right py-3 px-5 uppercase font-semibold text-sm">Qty Harvested</th>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Unit</th>
             <th className="text-left py-3 px-5 uppercase font-semibold text-sm">Quality Grade</th>
@@ -67,7 +57,10 @@ export default function HarvestLogList({
           {activeHarvestLogs.map((log) => (
             <tr key={log.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
               <td className="py-3 px-5">{new Date(log.harvest_date).toLocaleDateString()}</td>
-              <td className="py-3 px-5">{getPlantingLogInfo(log.planting_log_id)}</td>
+              <td className="py-3 px-5">
+                {log.sourceDisplay}
+                {log.varietyDisplay && <span className="text-xs text-gray-500 ml-1">({log.varietyDisplay})</span>}
+              </td>
               <td className="py-3 px-5 text-right">{log.quantity_harvested}</td>
               <td className="py-3 px-5">{log.quantity_unit}</td>
               <td className="py-3 px-5">{log.quality_grade || <span className="text-gray-400">N/A</span>}</td>

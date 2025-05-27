@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState } from 'react'; // Removed useEffect, useCallback
+import React, { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, HarvestLog } from '@/lib/db'; // Removed unused PlantingLog, SeedBatch, Crop
-import { requestPushChanges } from '@/lib/sync'; // Import requestPushChanges
+import { db, HarvestLog, PlantingLog, SeedBatch, Crop, Tree, SeedlingProductionLog, InputInventory } from '@/lib/db'; // Added Tree and other types for enrichment
+import { requestPushChanges } from '@/lib/sync';
 import HarvestLogList from '@/components/HarvestLogList';
 import HarvestLogForm from '@/components/HarvestLogForm';
 import { exportHarvestLogsToCSV, exportHarvestLogsToPDF } from '@/lib/reportUtils';
@@ -65,7 +65,85 @@ export default function HarvestLogsPage() {
     []
   );
 
-  const isLoading = harvestLogs === undefined || plantingLogs === undefined || seedBatches === undefined || crops === undefined;
+  const trees = useLiveQuery(
+    async () => {
+      try {
+        return await db.trees.orderBy('identifier').filter(t => t.is_deleted !== 1).toArray();
+      } catch (err) {
+        console.error("Failed to fetch trees for HarvestLogsPage:", err);
+        return [];
+      }
+    },
+    []
+  );
+  
+  // For enriching plantingLogDetails if needed by HarvestLogList
+  const seedlingProductionLogs = useLiveQuery(async () => db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(), []);
+  const inputInventory = useLiveQuery(async () => db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray(), []);
+
+
+  const isLoading = harvestLogs === undefined || plantingLogs === undefined || seedBatches === undefined || crops === undefined || trees === undefined || seedlingProductionLogs === undefined || inputInventory === undefined;
+
+  const enrichedHarvestLogs = React.useMemo(() => {
+    if (!harvestLogs || !plantingLogs || !seedBatches || !crops || !trees || !seedlingProductionLogs || !inputInventory) return [];
+
+    const cropsMap = new Map(crops.map(crop => [crop.id, crop]));
+    const seedBatchesMap = new Map(seedBatches.map(batch => [batch.id, batch]));
+    const plantingLogsMap = new Map(plantingLogs.map(pl => [pl.id, pl]));
+    const treesMap = new Map(trees.map(t => [t.id, t]));
+    const seedlingLogsMap = new Map(seedlingProductionLogs.map(sl => [sl.id, sl]));
+    const inputInventoryMap = new Map(inputInventory.map(ii => [ii.id, ii]));
+
+    return harvestLogs.map(hl => {
+      let plantingLogDetails: any = null; // Consider defining a proper type
+      let treeDetails: Tree | undefined = undefined;
+      let sourceDisplay = 'N/A';
+      let varietyDisplay = '';
+
+      if (hl.tree_id) {
+        treeDetails = treesMap.get(hl.tree_id);
+        if (treeDetails) {
+          sourceDisplay = treeDetails.identifier || treeDetails.species || 'Unknown Tree';
+          varietyDisplay = treeDetails.variety || '';
+        }
+      } else if (hl.planting_log_id) {
+        const pl = plantingLogsMap.get(hl.planting_log_id);
+        if (pl) {
+          // Simplified enrichment logic for planting log source - adapt from PlantingLogList/Form if more detail needed
+          if (pl.purchased_seedling_id) {
+            const purchasedSeedling = db.purchasedSeedlings.get(pl.purchased_seedling_id); // This is async, not ideal in map
+                                                                                      // For simplicity, assume purchasedSeedlings are pre-fetched if this path is common
+                                                                                      // Or, this enrichment needs to be async or handle promises
+            sourceDisplay = `Purchased Seedling (ID: ${pl.purchased_seedling_id.substring(0,4)})`; // Placeholder
+          } else if (pl.seedling_production_log_id) {
+            const sl = seedlingLogsMap.get(pl.seedling_production_log_id);
+            if (sl) {
+                const crop = sl.crop_id ? cropsMap.get(sl.crop_id) : undefined;
+                sourceDisplay = crop ? crop.name : `Self-Prod. (Log: ${sl.id.substring(0,4)})`;
+                varietyDisplay = crop?.variety || '';
+            }
+          } else if (pl.seed_batch_id) {
+            const sb = seedBatchesMap.get(pl.seed_batch_id);
+            if (sb) {
+              const crop = sb.crop_id ? cropsMap.get(sb.crop_id) : undefined;
+              sourceDisplay = crop ? crop.name : `Seed Batch (Code: ${sb.batch_code})`;
+              varietyDisplay = crop?.variety || '';
+            }
+          } else if (pl.input_inventory_id) {
+            const invItem = inputInventoryMap.get(pl.input_inventory_id);
+             if (invItem) {
+                const crop = invItem.crop_id ? cropsMap.get(invItem.crop_id) : undefined;
+                sourceDisplay = crop ? crop.name : invItem.name;
+                varietyDisplay = crop?.variety || '';
+             }
+          }
+          plantingLogDetails = { ...pl, derivedCropName: sourceDisplay, derivedVarietyName: varietyDisplay }; // Store derived names
+        }
+      }
+      return { ...hl, plantingLogDetails, treeDetails, sourceDisplay, varietyDisplay };
+    }).sort((a,b) => new Date(b.harvest_date).getTime() - new Date(a.harvest_date).getTime()); // Keep existing sort by harvest_date desc
+  }, [harvestLogs, plantingLogs, seedBatches, crops, trees, seedlingProductionLogs, inputInventory]);
+
 
   const handleFormSubmit = async (data: Omit<HarvestLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | HarvestLog) => {
     setIsSubmitting(true);
@@ -201,18 +279,16 @@ export default function HarvestLogsPage() {
       <div className="mt-4">
         {error && <p className="text-red-500 mb-4 p-3 bg-red-100 rounded-md">{error}</p>}
         {isLoading && <p className="text-center text-gray-500">Loading harvest logs...</p>}
-        {!isLoading && !error && harvestLogs && plantingLogs && seedBatches && crops && (
+        {!isLoading && !error && enrichedHarvestLogs && (
           <HarvestLogList
-            harvestLogs={harvestLogs}
-            plantingLogs={plantingLogs}
-            seedBatches={seedBatches}
-            crops={crops}
+            harvestLogs={enrichedHarvestLogs}
+            // plantingLogs, seedBatches, crops, trees are no longer directly needed if enrichment is complete
             onEdit={handleEdit}
             onDelete={handleDelete}
             isDeleting={isDeleting}
           />
         )}
-        {!isLoading && harvestLogs && harvestLogs.length === 0 && !error && (
+        {!isLoading && enrichedHarvestLogs && enrichedHarvestLogs.length === 0 && !error && (
            <div className="text-center py-10">
             <svg className="mx-auto h-12 w-12 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.5" stroke="currentColor" aria-hidden="true">
               <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125V6.375c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v.001c0 .621.504 1.125 1.125 1.125z" />
