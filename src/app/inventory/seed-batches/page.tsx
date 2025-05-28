@@ -38,7 +38,11 @@ export default function SeedBatchesPage(/*{ syncCounter }: SeedBatchesPageProps*
     async () => {
       try {
         // console.log("SeedBatchesPage: useLiveQuery fetching seedBatches..."); // DEBUG
-        const data = await db.seedBatches.orderBy('_last_modified').filter(sb => sb.is_deleted === 0).reverse().toArray();
+        const data = await db.seedBatches
+          .orderBy('_last_modified')
+          .filter(sb => sb.is_deleted === 0 && (sb.current_quantity || 0) > 0)
+          .reverse()
+          .toArray();
         // console.log('SeedBatchesPage: useLiveQuery fetched sBatchesData:', JSON.stringify(data.slice(0, 2), null, 2)); // DEBUG
         setError(null);
         return data;

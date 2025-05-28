@@ -80,6 +80,9 @@ export default function InputInventoryPage() {
       };
     });
 
+    // Filter out items with current_quantity <= 0
+    items = items.filter(item => (item.current_quantity || 0) > 0);
+
     if (filterName) {
       items = items.filter(item => item.name.toLowerCase().includes(filterName.toLowerCase()));
     }

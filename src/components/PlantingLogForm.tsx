@@ -238,6 +238,13 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
           setFormError(`Not enough self-produced seedlings available. Available: ${availableSeedlings}.`); return;
         }
       }
+
+      // Validate plantingDate is after sowing_date for self-produced seedlings
+      if (selectedSeedlingLog && new Date(plantingDate) <= new Date(selectedSeedlingLog.sowing_date)) {
+        setFormError(`Planting Date (${new Date(plantingDate).toLocaleDateString()}) must be after the Sowing Date (${new Date(selectedSeedlingLog.sowing_date).toLocaleDateString()}).`);
+        return;
+      }
+
       finalLogData = {
         seed_batch_id: undefined,
         seedling_production_log_id: seedlingProductionLogId,

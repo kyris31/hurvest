@@ -18,7 +18,11 @@ export default function PurchasedSeedlingsPage() {
   const purchasedSeedlings = useLiveQuery(
     async () => {
       try {
-        return await db.purchasedSeedlings.orderBy('purchase_date').filter(ps => ps.is_deleted !== 1).reverse().toArray();
+        return await db.purchasedSeedlings
+          .orderBy('purchase_date')
+          .filter(ps => ps.is_deleted !== 1 && ps.current_quantity > 0)
+          .reverse()
+          .toArray();
       } catch (err) {
         console.error("Failed to fetch purchased seedlings:", err);
         setError("Failed to load purchased seedlings. Please try again.");

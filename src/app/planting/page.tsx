@@ -19,7 +19,14 @@ export default function PlantingLogsPage() {
   const plantingLogs = useLiveQuery(
     async () => {
       try {
-        return await db.plantingLogs.orderBy('planting_date').filter(pl => pl.is_deleted === 0).reverse().toArray();
+        return await db.plantingLogs
+          .orderBy('planting_date')
+          .filter(pl =>
+            pl.is_deleted !== 1 &&
+            (pl.status === 'active' || pl.status === undefined || pl.status === null)
+          )
+          .reverse()
+          .toArray();
       } catch (err) {
         console.error("Failed to fetch planting logs with useLiveQuery:", err);
         setError("Failed to load planting logs. Please try again.");

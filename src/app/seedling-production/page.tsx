@@ -64,8 +64,11 @@ export default function SeedlingProductionPage() {
         return { ...log, cropName, cropVariety, seedBatchCode };
       });
 
-      // Sort enrichedLogs alphabetically by cropName (locale-sensitive), then by sowing_date descending
-      enrichedLogs.sort((a, b) => {
+      // Filter out logs with no available seedlings
+      const activeEnrichedLogs = enrichedLogs.filter(log => (log.current_seedlings_available || 0) > 0);
+
+      // Sort activeEnrichedLogs alphabetically by cropName (locale-sensitive), then by sowing_date descending
+      activeEnrichedLogs.sort((a, b) => {
         // Primary sort: cropName, locale-sensitive
         const nameComparison = (a.cropName || '').localeCompare(b.cropName || '', undefined, { sensitivity: 'base' });
         if (nameComparison !== 0) {
@@ -77,7 +80,7 @@ export default function SeedlingProductionPage() {
         return dateB - dateA; // Newest first for same crop name
       });
 
-      setLogs(enrichedLogs);
+      setLogs(activeEnrichedLogs);
     } catch (err) {
       console.error("Failed to fetch seedling production logs:", err);
       setError("Failed to load seedling production records. Please try again.");

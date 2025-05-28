@@ -1773,19 +1773,19 @@ export async function exportSeedlingLifecycleToPDF(filters?: DateRangeFilters): 
         const customFont = await pdfDoc.embedFont(fontBytes);
         const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
-        // Draw title manually for this specific report
+        // Call the common header function first
+        await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
+        // yPos is now updated by addPdfHeader to be below the common header elements.
+
+        // Draw the specific report title below the common header
         page.drawText("Seedling Lifecycle Report", {
             x: margin,
-            y: yPos.y,
-            font: customBoldFont, // Use bold for title
-            size: 18, // Title size
+            y: yPos.y, // Use the yPos updated by addPdfHeader
+            font: customBoldFont,
+            size: 18,
             color: rgb(0,0,0)
         });
-        yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title, ensure enough space for header line if addPdfHeader is used
-
-        // If addPdfHeader draws a generic header line or company info, call it here:
-        // await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
-        // yPos.y -= 10; // Adjust if addPdfHeader was called and drew something
+        yPos.y -= (18 * 1.2 + 15); // Adjust yPos further for space after this specific title
 
         const tableHeaders = ["Crop", "Sown", "Sown Qty", "Produced", "Transplanted", "Harvested", "Sold", "Remaining Seedlings"];
         const columnWidths = [80, 50, 50, 50, 70, 50, 50, 75]; // Adjusted for Transplanted header
