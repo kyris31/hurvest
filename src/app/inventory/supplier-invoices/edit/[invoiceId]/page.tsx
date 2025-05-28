@@ -39,9 +39,35 @@ export default function EditSupplierInvoicePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false); 
-  const [editingItem, setEditingItem] = useState<SupplierInvoiceItem | null>(null); 
+  const [editingItem, setEditingItem] = useState<SupplierInvoiceItem | null>(null);
   
   const [showAddItemForm, setShowAddItemForm] = useState(false);
+
+  // Memoized calculations for display and saving
+  const calculatedTotals = React.useMemo(() => {
+    if (!invoiceItems || invoiceItems.length === 0) {
+      return { itemsGross: 0, itemsVAT: 0, itemsNet: 0 };
+    }
+    const itemsGross = invoiceItems.reduce((sum, item) => sum + (item.line_total_gross || 0), 0);
+    const itemsVAT = invoiceItems.reduce((sum, item) => sum + (item.item_vat_amount || 0), 0);
+    // itemsNet should be sum of item.line_total_net, which already includes item-specific VAT and discounts
+    const itemsNet = invoiceItems.reduce((sum, item) => sum + (item.line_total_net || 0), 0);
+    return { itemsGross, itemsVAT, itemsNet };
+  }, [invoiceItems]);
+
+  // These are for the header display, taking into account invoice-level adjustments
+  const displayTotalGross = calculatedTotals.itemsGross;
+  const displayTotalVAT = calculatedTotals.itemsVAT + (invoice?.total_vat_amount || 0); // If invoice.total_vat_amount is an OVERALL adjustment
+                                                                                      // For now, let's assume header VAT is sum of item VATs for display
+                                                                                      // and invoice.total_vat_amount is for overall adjustments.
+                                                                                      // The user feedback implies header VAT should be sum of item VATs.
+  
+  const displaySubtotalAfterDiscCharges = displayTotalGross
+                                          - (invoice?.discount_amount || 0)
+                                          + (invoice?.shipping_cost || 0)
+                                          + (invoice?.other_charges || 0);
+                                          
+  const displayTotalNet = displaySubtotalAfterDiscCharges + calculatedTotals.itemsVAT; // Sum of item VATs for display
 
   const fetchInvoiceData = useCallback(async () => {
     if (!invoiceId) return;
@@ -91,29 +117,32 @@ export default function EditSupplierInvoicePage() {
     setIsSaving(true);
     setError(null);
     try {
-      let calculatedTotalGross = 0;
-      invoiceItems.forEach(item => {
-        calculatedTotalGross += item.line_total_gross || (item.package_quantity * item.price_per_package_gross) || 0;
-      });
+      // Use the memoized totals for saving
+      const currentCalculatedTotalGross = calculatedTotals.itemsGross;
+      const currentCalculatedTotalItemVAT = calculatedTotals.itemsVAT;
 
       const discountAmount = invoice.discount_amount || 0;
       const shippingCost = invoice.shipping_cost || 0;
-      const otherCharges = invoice.other_charges || 0; 
-      const vatAmount = invoice.total_vat_amount || 0;
+      const otherCharges = invoice.other_charges || 0;
+      
+      // For saving, total_vat_amount on the invoice should be the sum of item VATs.
+      // Any overall invoice VAT adjustment is not explicitly handled by this simple save,
+      // that's part of the 'Process Invoice' complexity or would need a dedicated field.
+      const finalVatToSave = currentCalculatedTotalItemVAT;
 
-      const subtotalAfterAdjustments = calculatedTotalGross - discountAmount + shippingCost + otherCharges;
-      const finalTotalNet = subtotalAfterAdjustments + vatAmount;
+      const subtotalAfterDiscCharges = currentCalculatedTotalGross - discountAmount + shippingCost + otherCharges;
+      const finalTotalNetToSave = subtotalAfterDiscCharges + finalVatToSave;
 
       const updatedInvoiceData: Partial<SupplierInvoice> = {
-        notes: invoice.notes, 
-        status: (invoice.status === 'draft' && invoiceItems.length > 0) ? 'pending_processing' : invoice.status, 
-        discount_amount: invoice.discount_amount,
+        notes: invoice.notes,
+        status: (invoice.status === 'draft' && invoiceItems.length > 0) ? 'pending_processing' : invoice.status,
+        discount_amount: invoice.discount_amount, // Keep user-entered overall adjustments
         shipping_cost: invoice.shipping_cost,
         other_charges: invoice.other_charges,
-        total_vat_amount: invoice.total_vat_amount,
-        total_amount_gross: calculatedTotalGross,
-        subtotal_after_adjustments: subtotalAfterAdjustments,
-        total_amount_net: finalTotalNet,
+        total_vat_amount: finalVatToSave, // Save the sum of item VATs
+        total_amount_gross: currentCalculatedTotalGross,
+        subtotal_after_adjustments: subtotalAfterDiscCharges,
+        total_amount_net: finalTotalNetToSave,
         updated_at: new Date().toISOString(),
         _last_modified: Date.now(),
         _synced: 0,
@@ -527,10 +556,10 @@ export default function EditSupplierInvoicePage() {
             <p><strong>Invoice Date:</strong> {new Date(invoice.invoice_date).toLocaleDateString()}</p>
             <p><strong>Supplier:</strong> {supplierName}</p>
             <p><strong>Status:</strong> {invoice.status}</p>
-            <p><strong>Total Gross (from items):</strong> €{(invoice.total_amount_gross || 0).toFixed(2)}</p>
-            <p><strong>Subtotal (after disc/charges):</strong> €{(invoice.subtotal_after_adjustments || 0).toFixed(2)}</p>
-            <p><strong>VAT Amount:</strong> €{(invoice.total_vat_amount || 0).toFixed(2)}</p>
-            <p className="font-semibold"><strong>Total Net Amount:</strong> €{(invoice.total_amount_net || 0).toFixed(2)}</p>
+            <p><strong>Total Gross (from items):</strong> €{(displayTotalGross || 0).toFixed(2)}</p>
+            <p><strong>Subtotal (after disc/charges):</strong> €{(displaySubtotalAfterDiscCharges || 0).toFixed(2)}</p>
+            <p><strong>VAT Amount:</strong> €{(calculatedTotals.itemsVAT || 0).toFixed(2)}</p>
+            <p className="font-semibold"><strong>Total Net Amount:</strong> €{(displayTotalNet || 0).toFixed(2)}</p>
             
             {(invoice.status === 'draft' || invoice.status === 'pending_processing') && (
               <div className="md:col-span-2">
