@@ -59,9 +59,10 @@ const TABLES_TO_SYNC = [
   { name: 'customers', dbTable: db.customers },
   { name: 'suppliers', dbTable: db.suppliers },
   { name: 'supplier_invoices', dbTable: db.supplierInvoices }, // Added Supplier Invoices
+  // input_inventory should come before supplier_invoice_items if supplier_invoice_items FKs to it
+  { name: 'input_inventory', dbTable: db.inputInventory },
   { name: 'supplier_invoice_items', dbTable: db.supplierInvoiceItems }, // Added Supplier Invoice Items
   { name: 'trees', dbTable: db.trees },
-  { name: 'input_inventory', dbTable: db.inputInventory },
   { name: 'purchased_seedlings', dbTable: db.purchasedSeedlings }, // Added Purchased Seedlings
   
   // Poultry Module
