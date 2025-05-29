@@ -477,15 +477,17 @@ export default function EditSupplierInvoicePage() {
         item_discount_value: formData.item_discount_value,
         item_vat_percentage: formData.item_vat_percentage,
         item_vat_amount: formData.item_vat_amount, // From form
-        cost_after_item_adjustments: formData.cost_after_item_adjustments, // From form
-        line_total_net: formData.cost_after_item_adjustments, // Preliminary net, will be finalized on process
+        cost_after_item_adjustments: formData.cost_after_item_adjustments, // From form (subtotal_before_item_vat + item_vat_amount)
+        subtotal_before_item_vat: formData.subtotal_before_item_vat, // From form
+        line_total_net: formData.cost_after_item_adjustments, // Preliminary net (includes item VAT), will be finalized on process
         notes: formData.notes,
         // Apportioned amounts are reset/recalculated during process, so initialize to 0 or keep existing if editing before re-process
         apportioned_discount_amount: editingItem?.apportioned_discount_amount || 0,
         apportioned_shipping_cost: editingItem?.apportioned_shipping_cost || 0,
         apportioned_other_charges: editingItem?.apportioned_other_charges || 0,
-        // This will also be recalculated on process
-        line_subtotal_after_apportionment: editingItem?.line_subtotal_after_apportionment || formData.cost_after_item_adjustments,
+        // This should be the subtotal before any VAT, after item discount, before invoice-level apportionments.
+        // It will be recalculated during process. For initial save/edit before process, it's subtotal_before_item_vat.
+        line_subtotal_after_apportionment: editingItem?.line_subtotal_after_apportionment !== undefined ? editingItem.line_subtotal_after_apportionment : formData.subtotal_before_item_vat,
         updated_at: now,
         _last_modified: Date.now(),
         _synced: 0,
@@ -509,12 +511,13 @@ export default function EditSupplierInvoicePage() {
           item_discount_value: formData.item_discount_value,
           item_vat_percentage: formData.item_vat_percentage,
           item_vat_amount: formData.item_vat_amount,
-          cost_after_item_adjustments: formData.cost_after_item_adjustments,
-          line_total_net: formData.cost_after_item_adjustments, // Preliminary
+          cost_after_item_adjustments: formData.cost_after_item_adjustments, // (subtotal_before_item_vat + item_vat_amount)
+          subtotal_before_item_vat: formData.subtotal_before_item_vat,
+          line_total_net: formData.cost_after_item_adjustments, // Preliminary (includes item VAT)
           apportioned_discount_amount: 0,
           apportioned_shipping_cost: 0,
           apportioned_other_charges: 0,
-          line_subtotal_after_apportionment: formData.cost_after_item_adjustments, // Preliminary
+          line_subtotal_after_apportionment: formData.subtotal_before_item_vat, // Preliminary (is pre-VAT)
           notes: formData.notes,
           created_at: now,
           updated_at: now,
