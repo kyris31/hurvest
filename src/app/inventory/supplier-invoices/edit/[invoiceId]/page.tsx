@@ -211,10 +211,23 @@ export default function EditSupplierInvoicePage() {
       // First pass: Calculate base for apportionment (cost_after_item_adjustments)
       // and then apportion invoice-level discounts, shipping, other charges.
       for (const item of currentInvoiceItems) {
-        // Ensure cost_after_item_adjustments is present, otherwise fall back to line_total_gross
-        // This field should have been populated when the item was saved via SupplierInvoiceItemForm
-        const baseCostForItemApportionment = item.cost_after_item_adjustments ?? item.line_total_gross ?? 0;
-        
+        // Use subtotal_before_item_vat as the base for apportioning non-VAT invoice level costs.
+        // This value is calculated and saved by SupplierInvoiceItemForm.
+        // Fallback if subtotal_before_item_vat is not present (e.g., for older records before this field was added).
+        let baseCostForItemApportionment = item.subtotal_before_item_vat;
+        if (baseCostForItemApportionment === undefined || baseCostForItemApportionment === null) {
+            // Fallback calculation for older items: item gross - item discount
+            const itemGross = item.line_total_gross || 0;
+            let itemDiscountAmount = 0;
+            if (item.item_discount_type === 'Amount' && item.item_discount_value) {
+                itemDiscountAmount = item.item_discount_value;
+            } else if (item.item_discount_type === 'Percentage' && item.item_discount_value) {
+                itemDiscountAmount = itemGross * (item.item_discount_value / 100);
+            }
+            baseCostForItemApportionment = itemGross - itemDiscountAmount;
+        }
+        baseCostForItemApportionment = baseCostForItemApportionment ?? 0;
+
         let apportionedInvDiscount = 0;
         let apportionedInvShipping = 0;
         let apportionedInvOther = 0;
@@ -274,13 +287,9 @@ export default function EditSupplierInvoicePage() {
                 // Spread processedItem to keep its calculated fields like apportioned_discount_amount etc.
                 // and its original item-specific VAT details.
                 ...processedItem,
-                // The 'vat_amount_on_line' in the schema was for apportioned invoice VAT.
-                // We can store it if needed, or just ensure line_total_net is correct.
-                // For clarity, let's assume the DB field `item_vat_amount` stores item-specific VAT,
-                // and we can add a new field like `apportioned_invoice_vat_amount` if we want to store this explicitly.
-                // Or, as per current schema, `vat_amount_on_line` (now `item_vat_amount`) stores item VAT.
-                // The `line_total_net` is the most critical part.
-                line_total_net: finalItemNet,
+                // item_vat_amount (item's own VAT) is already on processedItem from its initial save.
+                // line_subtotal_after_apportionment is now correctly BEFORE any VAT.
+                line_total_net: finalItemNet, // This is (subtotal_after_app_excl_vat + item_vat + apportioned_invoice_vat)
                 _last_modified: Date.now(),
                 _synced: 0,
             }
@@ -330,25 +339,35 @@ export default function EditSupplierInvoicePage() {
         
         finalUpdatedItemsForInvoiceSum.forEach(it => {
           finalInvoiceTotalGross += it.line_total_gross || 0;
-          // Subtotal for invoice header should be sum of item subtotals *before* item-level VAT is added to them
-          finalInvoiceSubtotalAfterAllApportionment += it.line_subtotal_after_apportionment || 0; 
-          finalInvoiceTotalNetFromItems += it.line_total_net || 0; // Sum of item final nets (VAT inclusive)
+          // line_subtotal_after_apportionment is now pre-VAT, so this sum is correct for a pre-VAT subtotal.
+          finalInvoiceSubtotalAfterAllApportionment += it.line_subtotal_after_apportionment || 0;
+          finalInvoiceTotalNetFromItems += it.line_total_net || 0; // Sum of item final nets (all VAT inclusive)
         });
         
-        // The invoice's subtotal_after_adjustments is the sum of item (gross - disc + ship + other)
+        // This is the sum of item subtotals after item discounts and after apportioned invoice-level non-VAT costs. It's PRE-VAT.
         const invoiceSubtotalForHeader = finalInvoiceSubtotalAfterAllApportionment;
-        // The invoice's total_amount_net should be the sum of all final item net amounts
-        const invoiceNetForHeader = finalInvoiceTotalNetFromItems; 
+        
+        // The invoice's total_vat_amount should be the sum of all item.item_vat_amount PLUS any overallVatAmount entered at invoice level
+        // For now, the overallVatAmount is used for apportionment. The sum of item_vat_amounts is what the header should reflect if it's a sum.
+        // Let's recalculate the sum of actual item VATs for storage on the invoice header, plus the apportioned overall.
+        // This part is tricky: if overallVatAmount is an override, it's used. If it's an addition, it's added.
+        // The current logic uses overallVatAmount for apportionment.
+        // The display variables `calculatedTotals.itemsVAT` already sum up `item.item_vat_amount`.
+        // Let's ensure the stored `total_vat_amount` on the invoice reflects the sum of item VATs + any overall invoice VAT that was apportioned.
+        // The `finalInvoiceTotalNetFromItems` already includes all VAT.
+        // So, total VAT = finalInvoiceTotalNetFromItems - invoiceSubtotalForHeader
+        const calculatedTotalVatForInvoice = finalInvoiceTotalNetFromItems - invoiceSubtotalForHeader;
+
 
         const finalInvoiceUpdateData: Partial<SupplierInvoice> = {
-          status: 'processed', 
-          total_amount_gross: finalInvoiceTotalGross,
-          discount_amount: currentInvoiceState.discount_amount,
-          shipping_cost: currentInvoiceState.shipping_cost,
-          other_charges: currentInvoiceState.other_charges,
-          total_vat_amount: currentInvoiceState.total_vat_amount, // Overall VAT entered by user
-          subtotal_after_adjustments: invoiceSubtotalForHeader, 
-          total_amount_net: invoiceNetForHeader, 
+          status: 'processed',
+          total_amount_gross: finalInvoiceTotalGross, // Sum of item gross
+          discount_amount: currentInvoiceState.discount_amount, // Overall invoice discount
+          shipping_cost: currentInvoiceState.shipping_cost,     // Overall invoice shipping
+          other_charges: currentInvoiceState.other_charges,   // Overall invoice other charges
+          total_vat_amount: calculatedTotalVatForInvoice, // Sum of all applied VAT (item + apportioned invoice)
+          subtotal_after_adjustments: invoiceSubtotalForHeader, // Sum of item subtotals after item disc & non-VAT invoice apportionments
+          total_amount_net: finalInvoiceTotalNetFromItems, // Sum of item final net amounts
           updated_at: new Date().toISOString(), _last_modified: Date.now(), _synced: 0,
         };
         await db.supplierInvoices.update(currentInvoiceState.id!, finalInvoiceUpdateData);

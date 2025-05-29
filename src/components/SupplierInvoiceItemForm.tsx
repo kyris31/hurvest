@@ -128,18 +128,16 @@ export default function SupplierInvoiceItemForm({
         }
       }
 
-      const priceAfterItemDiscount = lineTotalGrossOriginal - itemDiscountApplied;
+      const subtotalBeforeItemVat = lineTotalGrossOriginal - itemDiscountApplied; // This is priceAfterItemDiscount
 
       let calculatedItemVatAmount = 0;
       const currentItemVatPercentage = (itemVatPercentage !== '' && !isNaN(Number(itemVatPercentage))) ? Number(itemVatPercentage) : 0;
       if (currentItemVatPercentage > 0) {
-        calculatedItemVatAmount = priceAfterItemDiscount * (currentItemVatPercentage / 100);
+        calculatedItemVatAmount = subtotalBeforeItemVat * (currentItemVatPercentage / 100); // Calculate VAT on subtotal *before* VAT
       }
       
-      const costAfterItemAdjustments = priceAfterItemDiscount + calculatedItemVatAmount;
-      // For the form submission, line_total_net will be this cost_after_item_adjustments.
-      // The parent (EditSupplierInvoicePage) will handle apportioning invoice-level costs
-      // and calculating the *final* line_total_net.
+      const costAfterItemAdjustments = subtotalBeforeItemVat + calculatedItemVatAmount; // This is now correctly item subtotal + item VAT
+      // line_total_net for the item (before invoice-level apportionments) is this cost_after_item_adjustments.
 
       const formData: SupplierInvoiceItemFormData = {
         description_from_invoice: description.trim(),
@@ -151,10 +149,11 @@ export default function SupplierInvoiceItemForm({
         line_total_gross: lineTotalGrossOriginal,
         item_discount_type: itemDiscountType || undefined,
         item_discount_value: (itemDiscountValue !== '' && !isNaN(Number(itemDiscountValue))) ? Number(itemDiscountValue) : undefined,
+        subtotal_before_item_vat: subtotalBeforeItemVat, // Store this new field
         item_vat_percentage: currentItemVatPercentage > 0 ? currentItemVatPercentage : undefined,
         item_vat_amount: calculatedItemVatAmount,
-        cost_after_item_adjustments: costAfterItemAdjustments,
-        line_total_net: costAfterItemAdjustments, // Preliminary net; final net after invoice-level apportionment
+        cost_after_item_adjustments: costAfterItemAdjustments, // This is (subtotal_before_item_vat + item_vat_amount)
+        line_total_net: costAfterItemAdjustments, // Preliminary net; will be finalized during invoice processing
         notes: notes.trim() || undefined,
       };
       await onSubmit(formData, initialData?.id);

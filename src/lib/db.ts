@@ -544,8 +544,9 @@ export interface SupplierInvoiceItem {
   item_discount_type?: 'Percentage' | 'Amount' | ''; // Type of discount applied at the item level
   item_discount_value?: number; // Value of the item-level discount
 
+  subtotal_before_item_vat?: number;     // Cost of item after item-specific discount, but BEFORE item-specific VAT
   // Cost after item-specific discount and item-specific VAT
-  cost_after_item_adjustments?: number;
+  cost_after_item_adjustments?: number;  // This should be subtotal_before_item_vat + item_vat_amount
 
   // Apportioned invoice-level costs
   apportioned_discount_amount?: number; // Apportioned from overall invoice discount
@@ -557,7 +558,7 @@ export interface SupplierInvoiceItem {
   
   // Item-specific VAT
   item_vat_percentage?: number; // VAT percentage applied specifically to this item
-  item_vat_amount?: number; // VAT amount calculated specifically for this item
+  item_vat_amount?: number; // VAT amount calculated specifically for this item (based on subtotal_before_item_vat)
   
   // Note: The overall invoice VAT will be apportioned and added to line_subtotal_after_apportionment
   // to get the final line_total_net.
