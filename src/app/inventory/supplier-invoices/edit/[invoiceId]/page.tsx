@@ -50,24 +50,26 @@ export default function EditSupplierInvoicePage() {
     }
     const itemsGross = invoiceItems.reduce((sum, item) => sum + (item.line_total_gross || 0), 0);
     const itemsVAT = invoiceItems.reduce((sum, item) => sum + (item.item_vat_amount || 0), 0);
-    // itemsNet should be sum of item.line_total_net, which already includes item-specific VAT and discounts
+    const itemsSubtotalBeforeItemVAT = invoiceItems.reduce((sum, item) => sum + (item.subtotal_before_item_vat || 0), 0);
+    // itemsNet is sum of item.line_total_net (which is item.subtotal_before_item_vat + item.item_vat_amount, before processing)
+    // or (item.subtotal_after_apportionment_pre_vat + item.item_vat_amount + apportioned_invoice_vat, after processing)
     const itemsNet = invoiceItems.reduce((sum, item) => sum + (item.line_total_net || 0), 0);
-    return { itemsGross, itemsVAT, itemsNet };
+    return { itemsGross, itemsVAT, itemsSubtotalBeforeItemVAT, itemsNet };
   }, [invoiceItems]);
 
-  // These are for the header display, taking into account invoice-level adjustments
-  const displayTotalGross = calculatedTotals.itemsGross;
-  const displayTotalVAT = calculatedTotals.itemsVAT + (invoice?.total_vat_amount || 0); // If invoice.total_vat_amount is an OVERALL adjustment
-                                                                                      // For now, let's assume header VAT is sum of item VATs for display
-                                                                                      // and invoice.total_vat_amount is for overall adjustments.
-                                                                                      // The user feedback implies header VAT should be sum of item VATs.
+  // These are for the header display
+  const displayTotalGrossFromItems = calculatedTotals.itemsGross; // Sum of item gross amounts
+  const displayTotalItemVAT = calculatedTotals.itemsVAT; // Sum of item VAT amounts
+
+  // This is the sum of item subtotals (after item-specific discounts but before item VAT),
+  // further adjusted by any OVERALL invoice discount, shipping, and other charges.
+  const displaySubtotalAfterAllAdjustments = calculatedTotals.itemsSubtotalBeforeItemVAT
+                                             - (invoice?.discount_amount || 0)  // Overall invoice discount
+                                             + (invoice?.shipping_cost || 0)    // Overall invoice shipping
+                                             + (invoice?.other_charges || 0);   // Overall invoice other charges
   
-  const displaySubtotalAfterDiscCharges = displayTotalGross
-                                          - (invoice?.discount_amount || 0)
-                                          + (invoice?.shipping_cost || 0)
-                                          + (invoice?.other_charges || 0);
-                                          
-  const displayTotalNet = displaySubtotalAfterDiscCharges + calculatedTotals.itemsVAT; // Sum of item VATs for display
+  // Final Net for display: Subtotal after all adjustments + Sum of all item VATs
+  const displayTotalNet = displaySubtotalAfterAllAdjustments + displayTotalItemVAT;
 
   const fetchInvoiceData = useCallback(async () => {
     if (!invoiceId) return;
@@ -117,32 +119,27 @@ export default function EditSupplierInvoicePage() {
     setIsSaving(true);
     setError(null);
     try {
-      // Use the memoized totals for saving
-      const currentCalculatedTotalGross = calculatedTotals.itemsGross;
-      const currentCalculatedTotalItemVAT = calculatedTotals.itemsVAT;
-
-      const discountAmount = invoice.discount_amount || 0;
-      const shippingCost = invoice.shipping_cost || 0;
-      const otherCharges = invoice.other_charges || 0;
-      
-      // For saving, total_vat_amount on the invoice should be the sum of item VATs.
-      // Any overall invoice VAT adjustment is not explicitly handled by this simple save,
-      // that's part of the 'Process Invoice' complexity or would need a dedicated field.
-      const finalVatToSave = currentCalculatedTotalItemVAT;
-
-      const subtotalAfterDiscCharges = currentCalculatedTotalGross - discountAmount + shippingCost + otherCharges;
-      const finalTotalNetToSave = subtotalAfterDiscCharges + finalVatToSave;
+      // Use the new display variables for saving, as they reflect the correct logic
+      // Note: invoice.discount_amount, shipping_cost, other_charges are user-entered overall adjustments.
+      // calculatedTotals.itemsGross is sum of item gross.
+      // calculatedTotals.itemsVAT is sum of item VATs.
+      // displaySubtotalAfterAllAdjustments is (sum of item subtotals pre-VAT) - overall_discount + overall_shipping + overall_other_charges.
+      // displayTotalNet is displaySubtotalAfterAllAdjustments + sum_of_item_VATs.
 
       const updatedInvoiceData: Partial<SupplierInvoice> = {
         notes: invoice.notes,
         status: (invoice.status === 'draft' && invoiceItems.length > 0) ? 'pending_processing' : invoice.status,
-        discount_amount: invoice.discount_amount, // Keep user-entered overall adjustments
-        shipping_cost: invoice.shipping_cost,
-        other_charges: invoice.other_charges,
-        total_vat_amount: finalVatToSave, // Save the sum of item VATs
-        total_amount_gross: currentCalculatedTotalGross,
-        subtotal_after_adjustments: subtotalAfterDiscCharges,
-        total_amount_net: finalTotalNetToSave,
+        
+        total_amount_gross: displayTotalGrossFromItems, // Sum of item gross amounts
+        discount_amount: invoice.discount_amount || 0,  // User-entered OVERALL discount
+        shipping_cost: invoice.shipping_cost || 0,    // User-entered OVERALL shipping
+        other_charges: invoice.other_charges || 0,    // User-entered OVERALL other charges
+        
+        // This is the subtotal after sum of item gross has been adjusted by OVERALL discount/shipping/other. It's pre-VAT.
+        subtotal_after_adjustments: displaySubtotalAfterAllAdjustments,
+        
+        total_vat_amount: displayTotalItemVAT, // Sum of all item-level VATs
+        total_amount_net: displayTotalNet,     // Final net amount for the invoice
         updated_at: new Date().toISOString(),
         _last_modified: Date.now(),
         _synced: 0,
@@ -578,9 +575,9 @@ export default function EditSupplierInvoicePage() {
             <p><strong>Invoice Date:</strong> {new Date(invoice.invoice_date).toLocaleDateString()}</p>
             <p><strong>Supplier:</strong> {supplierName}</p>
             <p><strong>Status:</strong> {invoice.status}</p>
-            <p><strong>Total Gross (from items):</strong> €{(displayTotalGross || 0).toFixed(2)}</p>
-            <p><strong>Subtotal (after disc/charges):</strong> €{(displaySubtotalAfterDiscCharges || 0).toFixed(2)}</p>
-            <p><strong>VAT Amount:</strong> €{(calculatedTotals.itemsVAT || 0).toFixed(2)}</p>
+            <p><strong>Total Gross (from items):</strong> €{(displayTotalGrossFromItems || 0).toFixed(2)}</p>
+            <p><strong>Subtotal (after disc/charges):</strong> €{(displaySubtotalAfterAllAdjustments || 0).toFixed(2)}</p>
+            <p><strong>VAT Amount:</strong> €{(displayTotalItemVAT || 0).toFixed(2)}</p>
             <p className="font-semibold"><strong>Total Net Amount:</strong> €{(displayTotalNet || 0).toFixed(2)}</p>
             
             {(invoice.status === 'draft' || invoice.status === 'pending_processing') && (
