@@ -1,5 +1,5 @@
 import { db } from './db';
-import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog } from './db'; // Added Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog
+import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput } from './db'; // Added Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput
 import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
@@ -90,6 +90,8 @@ export async function calculateDashboardMetrics(filters?: DateRangeFilters): Pro
   const customersPromise = db.customers.filter(c => c.is_deleted !== 1).toArray();
   const allSeedBatchesPromise = db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray();
   const allSeedlingProductionLogsPromise = db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray();
+  const allCultivationActivityPlantingLinksPromise = db.cultivationActivityPlantingLinks.filter(capl => capl.is_deleted !== 1).toArray();
+  const allCultivationActivityUsedInputsPromise = db.cultivationActivityUsedInputs.filter(caui => caui.is_deleted !== 1).toArray();
 
   const [
     relevantInputInventory, // Directly linked to sale items
@@ -100,7 +102,9 @@ export async function calculateDashboardMetrics(filters?: DateRangeFilters): Pro
     allInputInventory, // Comprehensive list for all cost lookups
     customers,
     allSeedBatches,
-    allSeedlingProductionLogs
+    allSeedlingProductionLogs,
+    allCultivationActivityPlantingLinks,
+    allCultivationActivityUsedInputs
   ] = await Promise.all([
     relevantInputInventoryPromise,
     Promise.resolve(tempRelevantHarvestLogs), // Use the already awaited version
@@ -110,7 +114,9 @@ export async function calculateDashboardMetrics(filters?: DateRangeFilters): Pro
     allInputInventoryPromise,
     customersPromise,
     allSeedBatchesPromise,
-    allSeedlingProductionLogsPromise
+    allSeedlingProductionLogsPromise,
+    allCultivationActivityPlantingLinksPromise,
+    allCultivationActivityUsedInputsPromise
   ]);
     
   // ---- START DEBUG BLOCK ----
@@ -291,13 +297,29 @@ export async function calculateDashboardMetrics(filters?: DateRangeFilters): Pro
           totalCostForPlanting += seedCostForPlanting;
 
           // 2. Cost of cultivation inputs for this planting log
-          const cultivationLogsForPlanting = allCultivationLogs.filter(cl => cl.planting_log_id === plantingLog.id);
-          for (const cl of cultivationLogsForPlanting) {
-            if (cl.input_inventory_id && cl.input_quantity_used) {
-              const inputUsed = inventoryMap.get(cl.input_inventory_id);
-              if (inputUsed && inputUsed.initial_quantity && inputUsed.initial_quantity > 0 && inputUsed.total_purchase_cost !== undefined) {
-                const costPerUnitInput = inputUsed.total_purchase_cost / inputUsed.initial_quantity;
-                totalCostForPlanting += costPerUnitInput * cl.input_quantity_used;
+          // Find all cultivation log IDs linked to this plantingLog.id
+          const relevantCultivationLogIds = allCultivationActivityPlantingLinks
+            .filter(link => link.planting_log_id === plantingLog.id)
+            .map(link => link.cultivation_log_id);
+
+          // Find all used inputs for these cultivation logs
+          for (const cultLogId of relevantCultivationLogIds) {
+            const usedInputsForThisCultLog = allCultivationActivityUsedInputs
+              .filter(usedInput => usedInput.cultivation_log_id === cultLogId);
+
+            for (const usedInputEntry of usedInputsForThisCultLog) {
+              // Ensure input_inventory_id and quantity_used are present on usedInputEntry
+              if (usedInputEntry.input_inventory_id && usedInputEntry.quantity_used) {
+                const inputItemDetails = inventoryMap.get(usedInputEntry.input_inventory_id);
+                if (inputItemDetails && inputItemDetails.initial_quantity && inputItemDetails.initial_quantity > 0 && inputItemDetails.total_purchase_cost !== undefined) {
+                  const costPerUnitInput = inputItemDetails.total_purchase_cost / inputItemDetails.initial_quantity;
+                  totalCostForPlanting += costPerUnitInput * usedInputEntry.quantity_used;
+                } else if (inputItemDetails && inputItemDetails.cost_per_unit !== undefined) {
+                  // Fallback to using pre-calculated cost_per_unit if available
+                  totalCostForPlanting += inputItemDetails.cost_per_unit * usedInputEntry.quantity_used;
+                } else {
+                  console.warn(`[COGS Cultivation] Could not determine cost for input ${usedInputEntry.input_inventory_id} used in cultivation log ${cultLogId}. Initial quantity/total cost or cost_per_unit missing.`);
+                }
               }
             }
           }
@@ -2102,48 +2124,77 @@ export async function getInputItemUsageLedgerData(filters?: { itemId?: string })
     const inputItem = await db.inputInventory.get(filters.itemId);
     if (!inputItem || inputItem.is_deleted === 1) return [];
 
-    const cultivationLogs = await db.cultivationLogs
+    // 1. Find all CultivationActivityUsedInput records for the given itemId
+    const usedInputEntries = await db.cultivationActivityUsedInputs
         .where('input_inventory_id').equals(filters.itemId)
+        .and(entry => entry.is_deleted !== 1)
+        .toArray();
+
+    if (usedInputEntries.length === 0) return [{
+        itemId: inputItem.id,
+        itemName: inputItem.name,
+        itemType: inputItem.type,
+        initialQuantity: inputItem.initial_quantity,
+        currentQuantity: inputItem.current_quantity,
+        quantityUnit: inputItem.quantity_unit,
+        usageDetails: []
+    }];
+
+    const cultivationLogIdsFromUsedInputs = [...new Set(usedInputEntries.map(entry => entry.cultivation_log_id))];
+
+    // 2. Fetch the actual CultivationLog records
+    const cultivationLogs = await db.cultivationLogs
+        .where('id').anyOf(cultivationLogIdsFromUsedInputs)
         .and(log => log.is_deleted !== 1)
-        .sortBy('activity_date');
-
-    const plantingLogIds = cultivationLogs.map(cl => cl.planting_log_id).filter(id => id) as string[];
-    const uniquePlantingLogIds = [...new Set(plantingLogIds)];
+        // .sortBy('activity_date'); // Sorting later after merging with usedInputEntry
+        .toArray();
     
-    const plantingLogs = await db.plantingLogs.where('id').anyOf(uniquePlantingLogIds).toArray();
-    const seedBatchIds = plantingLogs.map(pl => pl.seed_batch_id).filter(id => id) as string[];
-    const uniqueSeedBatchIds = [...new Set(seedBatchIds)];
+    const cultivationLogMap = new Map(cultivationLogs.map(cl => [cl.id, cl]));
 
-    const seedBatches = await db.seedBatches.where('id').anyOf(uniqueSeedBatchIds).toArray();
-    const cropIdsFromSeedBatches = seedBatches.map(sb => sb.crop_id).filter(id => id) as string[];
+    // 3. Fetch all CultivationActivityPlantingLinks for these cultivation logs
+    const plantingLinks = await db.cultivationActivityPlantingLinks
+        .where('cultivation_log_id').anyOf(cultivationLogIdsFromUsedInputs)
+        .and(link => link.is_deleted !== 1)
+        .toArray();
     
-    // If cultivation logs can link directly to crops (not currently in schema but for future proofing)
-    // const cropIdsFromCultivation = cultivationLogs.map(cl => cl.crop_id).filter(id => id) as string[];
-    // const allCropIds = [...new Set([...cropIdsFromSeedBatches, ...cropIdsFromCultivation])];
-    const allCropIds = [...new Set(cropIdsFromSeedBatches)];
-
-
-    const crops = await db.crops.where('id').anyOf(allCropIds).toArray();
+    const plantingLogIdsFromLinks = [...new Set(plantingLinks.map(link => link.planting_log_id))];
     
-    const cropMap = new Map(crops.map(c => [c.id, c]));
+    // 4. Fetch related PlantingLogs, SeedBatches, and Crops
+    const plantingLogs = await db.plantingLogs.where('id').anyOf(plantingLogIdsFromLinks).and(pl => pl.is_deleted !== 1).toArray();
     const plantingLogMap = new Map(plantingLogs.map(pl => [pl.id, pl]));
+
+    const seedBatchIds = [...new Set(plantingLogs.map(pl => pl.seed_batch_id).filter(id => !!id) as string[])];
+    const seedBatches = await db.seedBatches.where('id').anyOf(seedBatchIds).and(sb => sb.is_deleted !== 1).toArray();
     const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb]));
 
-    const usageDetails: CultivationUsageDetail[] = cultivationLogs.map(cl => {
-        const pLog = cl.planting_log_id ? plantingLogMap.get(cl.planting_log_id) : undefined;
+    const cropIds = [...new Set(seedBatches.map(sb => sb.crop_id).filter(id => !!id) as string[])];
+    const crops = await db.crops.where('id').anyOf(cropIds).and(c => c.is_deleted !== 1).toArray();
+    const cropMap = new Map(crops.map(c => [c.id, c]));
+
+    // 5. Construct usageDetails by iterating over usedInputEntries
+    const usageDetails: CultivationUsageDetail[] = usedInputEntries.map(usedInputEntry => {
+        const cl = cultivationLogMap.get(usedInputEntry.cultivation_log_id);
+        if (!cl) return null; // Should not happen if data is consistent
+
+        // Find the planting_log_id associated with this cultivation_log_id
+        const relevantPlantingLink = plantingLinks.find(link => link.cultivation_log_id === cl.id);
+        const pLog = relevantPlantingLink ? plantingLogMap.get(relevantPlantingLink.planting_log_id) : undefined;
+        
         const sBatch = pLog?.seed_batch_id ? seedBatchMap.get(pLog.seed_batch_id) : undefined;
         const crop = sBatch?.crop_id ? cropMap.get(sBatch.crop_id) : undefined;
-        // If direct crop_id on cultivation log: const crop = cl.crop_id ? cropMap.get(cl.crop_id) : undefined;
 
         return {
             activityDate: new Date(cl.activity_date).toLocaleDateString(),
             activityType: cl.activity_type,
             cropName: crop?.name,
-            plotAffected: cl.plot_affected || pLog?.plot_affected,
-            quantityUsed: cl.input_quantity_used || 0,
-            quantityUnit: cl.input_quantity_unit
+            plotAffected: cl.plot_affected || pLog?.plot_affected, // Prefer direct plot on CL, fallback to PL
+            quantityUsed: usedInputEntry.quantity_used || 0,
+            quantityUnit: usedInputEntry.quantity_unit
         };
-    });
+    }).filter(detail => detail !== null) as CultivationUsageDetail[];
+
+    // Sort usageDetails by activityDate
+    usageDetails.sort((a, b) => new Date(a.activityDate).getTime() - new Date(b.activityDate).getTime());
 
     return [{
         itemId: inputItem.id,
@@ -2422,7 +2473,19 @@ export interface DetailedInputUsageReportItem {
 }
 
 export async function getDetailedInputUsageData(filters?: DateRangeFilters): Promise<DetailedInputUsageReportItem[]> {
-    let cultivationLogsQuery = db.cultivationLogs.filter(cl => cl.is_deleted !== 1 && cl.input_inventory_id != null);
+    // 1. Fetch all CultivationActivityUsedInput records that are not deleted.
+    const allUsedInputEntries = await db.cultivationActivityUsedInputs
+        .filter(caui => caui.is_deleted !== 1)
+        .toArray();
+
+    if (allUsedInputEntries.length === 0) return [];
+
+    const cultivationLogIdsFromUsedInputs = [...new Set(allUsedInputEntries.map(entry => entry.cultivation_log_id))];
+    
+    // 2. Fetch relevant CultivationLogs and apply date filters.
+    let cultivationLogsQuery = db.cultivationLogs
+        .where('id').anyOf(cultivationLogIdsFromUsedInputs)
+        .and(cl => cl.is_deleted !== 1);
 
     if (filters?.startDate) {
         cultivationLogsQuery = cultivationLogsQuery.and(cl => cl.activity_date >= filters.startDate!);
@@ -2430,43 +2493,80 @@ export async function getDetailedInputUsageData(filters?: DateRangeFilters): Pro
     if (filters?.endDate) {
         cultivationLogsQuery = cultivationLogsQuery.and(cl => cl.activity_date <= filters.endDate!);
     }
-    const cultivationLogs = await cultivationLogsQuery.sortBy('activity_date');
+    const cultivationLogs = await cultivationLogsQuery.toArray();
 
-    const inputInventoryIds = [...new Set(cultivationLogs.map(cl => cl.input_inventory_id).filter(id => id) as string[])];
-    const plantingLogIds = [...new Set(cultivationLogs.map(cl => cl.planting_log_id).filter(id => id) as string[])];
+    // Filter allUsedInputEntries to only include those whose cultivationLog is in the date-filtered cultivationLogs
+    const cultivationLogIdSet = new Set(cultivationLogs.map(cl => cl.id));
+    const filteredUsedInputEntries = allUsedInputEntries.filter(entry => cultivationLogIdSet.has(entry.cultivation_log_id));
+
+    if (filteredUsedInputEntries.length === 0) return [];
+
+    // Get the final set of CultivationLog IDs that are actually part of the report
+    const finalCultivationLogIds = [...new Set(filteredUsedInputEntries.map(entry => entry.cultivation_log_id))];
+    // Ensure cultivationLogs only contains logs that are part of filteredUsedInputEntries
+    const finalCultivationLogs = cultivationLogs.filter(cl => finalCultivationLogIds.includes(cl.id));
+    const cultivationLogMap = new Map(finalCultivationLogs.map(cl => [cl.id, cl]));
+
+    // 3. Fetch all CultivationActivityPlantingLinks for these cultivation logs
+    const plantingLinks = await db.cultivationActivityPlantingLinks
+        .where('cultivation_log_id').anyOf(finalCultivationLogIds)
+        .and(link => link.is_deleted !== 1)
+        .toArray();
     
-    const [inputInventoryItems, plantingLogs] = await Promise.all([
-        db.inputInventory.where('id').anyOf(inputInventoryIds).toArray(),
-        db.plantingLogs.where('id').anyOf(plantingLogIds).toArray()
+    const plantingLogIdsFromLinks = [...new Set(plantingLinks.map(link => link.planting_log_id).filter(id => !!id))];
+
+    // 4. Fetch related InputInventoryItems, PlantingLogs, SeedBatches, and Crops
+    const inputInventoryIds = [...new Set(filteredUsedInputEntries.map(entry => entry.input_inventory_id).filter(id => !!id))];
+    
+    const [inputInventoryItems, plantingLogsData, seedBatchesData, cropsData] = await Promise.all([
+        db.inputInventory.where('id').anyOf(inputInventoryIds).and(ii => ii.is_deleted !== 1).toArray(),
+        db.plantingLogs.where('id').anyOf(plantingLogIdsFromLinks).and(pl => pl.is_deleted !== 1).toArray(),
+        db.seedBatches.where('id').anyOf( // Fetch based on IDs from plantingLogsData
+            [...new Set( (await db.plantingLogs.where('id').anyOf(plantingLogIdsFromLinks).and(pl => pl.is_deleted !== 1).toArray()).map(pl => pl.seed_batch_id).filter(id => !!id) as string[])]
+        ).and(sb => sb.is_deleted !== 1).toArray(),
+        db.crops.where('id').anyOf( // Fetch based on IDs from seedBatchesData (which itself is based on plantingLogsData)
+             [...new Set( (await db.seedBatches.where('id').anyOf([...new Set( (await db.plantingLogs.where('id').anyOf(plantingLogIdsFromLinks).and(pl => pl.is_deleted !== 1).toArray()).map(pl => pl.seed_batch_id).filter(id => !!id) as string[])]).and(sb => sb.is_deleted !== 1).toArray()).map(sb => sb.crop_id).filter(id => !!id) as string[])]
+        ).and(c => c.is_deleted !== 1).toArray()
     ]);
     
-    const seedBatchIds = [...new Set(plantingLogs.map(pl => pl.seed_batch_id).filter(id => id) as string[])];
-    const seedBatches = await db.seedBatches.where('id').anyOf(seedBatchIds).toArray();
-    const cropIds = [...new Set(seedBatches.map(sb => sb.crop_id).filter(id => id) as string[])];
-    const crops = await db.crops.where('id').anyOf(cropIds).toArray();
+    const inputMap = new Map(inputInventoryItems.map(ii => [ii.id, ii]));
+    const plantingLogMap = new Map(plantingLogsData.map(pl => [pl.id, pl]));
+    const seedBatchMap = new Map(seedBatchesData.map(sb => [sb.id, sb]));
+    const cropMap = new Map(cropsData.map(c => [c.id, c]));
 
-    const inputMap = new Map(inputInventoryItems.map(i => [i.id, i]));
-    const plantingLogMap = new Map(plantingLogs.map(pl => [pl.id, pl]));
-    const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb]));
-    const cropMap = new Map(crops.map(c => [c.id, c]));
+    // 5. Construct report items by iterating over filteredUsedInputEntries
+    let reportItems = filteredUsedInputEntries.map(usedInputEntry => {
+        const cl = cultivationLogMap.get(usedInputEntry.cultivation_log_id);
+        if (!cl) return null;
 
-    return cultivationLogs.map(cl => {
-        const inputItem = cl.input_inventory_id ? inputMap.get(cl.input_inventory_id) : undefined;
-        const pLog = cl.planting_log_id ? plantingLogMap.get(cl.planting_log_id) : undefined;
+        const inputItem = inputMap.get(usedInputEntry.input_inventory_id);
+        if (!inputItem) return null;
+
+        const relevantPlantingLink = plantingLinks.find(link => link.cultivation_log_id === cl.id);
+        const pLog = relevantPlantingLink ? plantingLogMap.get(relevantPlantingLink.planting_log_id) : undefined;
+        
         const sBatch = pLog?.seed_batch_id ? seedBatchMap.get(pLog.seed_batch_id) : undefined;
         const crop = sBatch?.crop_id ? cropMap.get(sBatch.crop_id) : undefined;
 
         return {
-            activityDate: new Date(cl.activity_date).toLocaleDateString(),
-            inputName: inputItem?.name || 'Unknown Input',
+            activityDate: cl.activity_date, // Keep as string for sorting
+            inputName: inputItem.name,
             activityType: cl.activity_type,
             cropName: crop?.name,
             plotAffected: cl.plot_affected || pLog?.plot_affected,
-            quantityUsed: cl.input_quantity_used || 0,
-            quantityUnit: cl.input_quantity_unit || inputItem?.quantity_unit,
+            quantityUsed: usedInputEntry.quantity_used || 0,
+            quantityUnit: usedInputEntry.quantity_unit || inputItem.quantity_unit,
             notes: cl.notes
         };
-    }).sort((a,b) => new Date(b.activityDate).getTime() - new Date(a.activityDate).getTime());
+    }).filter(item => item !== null) as DetailedInputUsageReportItem[];
+
+    // Sort by activity_date (as string YYYY-MM-DD) and then format the date for display
+    reportItems.sort((a, b) => a.activityDate.localeCompare(b.activityDate));
+    
+    return reportItems.map(item => ({
+        ...item,
+        activityDate: new Date(item.activityDate).toLocaleDateString()
+    }));
 }
 
 function convertDetailedInputUsageToCSV(data: DetailedInputUsageReportItem[]): string {
