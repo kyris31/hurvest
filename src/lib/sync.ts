@@ -77,6 +77,8 @@ const TABLES_TO_SYNC = [
 
   // Further dependencies
   { name: 'cultivation_logs', dbTable: db.cultivationLogs }, // Depends on planting_logs, input_inventory
+  { name: 'cultivation_activity_planting_links', dbTable: db.cultivationActivityPlantingLinks }, // Depends on cultivation_logs, planting_logs
+  { name: 'cultivation_activity_used_inputs', dbTable: db.cultivationActivityUsedInputs }, // Depends on cultivation_logs, input_inventory
   { name: 'harvest_logs', dbTable: db.harvestLogs }, // Depends on planting_logs
   { name: 'reminders', dbTable: db.reminders }, // Can depend on planting_logs
 

@@ -46,7 +46,22 @@ export default function ImportSupplierInvoicePage() {
       return;
     }
 
+    // Validate for duplicate invoice number for the same supplier
     try {
+      const trimmedInvoiceNumber = invoiceNumber.trim();
+      const existingInvoice = await db.supplierInvoices
+        .where(['supplier_id', 'invoice_number'])
+        .equals([supplierId, trimmedInvoiceNumber])
+        .filter(inv => inv.is_deleted !== 1)
+        .first();
+
+      if (existingInvoice) {
+        const selectedSupplier = suppliers.find(s => s.id === supplierId);
+        setError(`Error: An invoice with number "${trimmedInvoiceNumber}" already exists for supplier "${selectedSupplier?.name || supplierId}". Please use a unique invoice number for this supplier.`);
+        setIsSubmitting(false);
+        return;
+      }
+
       const newInvoiceId = crypto.randomUUID();
       const now = new Date().toISOString();
       const draftInvoiceData: SupplierInvoice = {

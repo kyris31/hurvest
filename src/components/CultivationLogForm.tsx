@@ -1,29 +1,64 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { CultivationLog, PlantingLog, InputInventory, db } from '@/lib/db'; // Removed unused SeedBatch, Crop
+// Ensure all necessary types are imported, including CultivationActivityPlantingLink
+import { CultivationLog, PlantingLog, InputInventory, SeedBatch, Crop, SeedlingProductionLog, PurchasedSeedling, db, CultivationActivityPlantingLink, CultivationActivityUsedInput } from '@/lib/db';
+
+// Define UsedInputItem interface locally if it's specific to this form's state management
+interface UsedInputItem {
+  id?: string; // ID of the CultivationActivityUsedInput link if editing an existing one
+  input_inventory_id: string;
+  quantity_used: number | ''; // Allow empty string for input field
+  quantity_unit: string;
+  original_input_inventory_id?: string; // For tracking changes during edit
+  original_quantity_used?: number;     // For tracking changes during edit
+  is_deleted_in_form?: boolean; // UI flag to mark for deletion before submit
+}
+
+interface CultivationLogFormData {
+  logData: Omit<CultivationLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'> | CultivationLog;
+  usedInputs: Array<{ // This is what gets sent to the parent
+    id?: string; // ID of CultivationActivityUsedInput
+    input_inventory_id: string;
+    quantity_used: number;
+    quantity_unit: string;
+    is_deleted?: boolean; // To signal deletion to parent
+  }>;
+  // planting_log_ids will be handled by the parent based on selectedPlantingLogIds if needed,
+  // or by creating CultivationActivityPlantingLink entries.
+  // For now, this form will manage selectedPlantingLogIds and the parent will create the links.
+}
 
 interface CultivationLogFormProps {
-  initialData?: CultivationLog | null;
-  onSubmit: (data: Omit<CultivationLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | CultivationLog) => Promise<void>;
+  initialLogData?: CultivationLog | null;
+  initialUsedInputs?: CultivationActivityUsedInput[]; // Expecting the DB type from parent
+  plantingLogs: (PlantingLog & { cropName?: string; seedBatchCode?: string; displayLabel?: string })[];
+  inputInventory: InputInventory[];
+  activityPlantingLinks?: CultivationActivityPlantingLink[]; // For pre-selecting planting logs if editing
+
+  onSubmit: (data: CultivationLogFormData) => Promise<void>;
   onCancel: () => void;
   isSubmitting: boolean;
 }
 
-export default function CultivationLogForm({ initialData, onSubmit, onCancel, isSubmitting }: CultivationLogFormProps) {
-  const [plantingLogId, setPlantingLogId] = useState('');
+export default function CultivationLogForm({
+  initialLogData,
+  initialUsedInputs = [],
+  plantingLogs: availablePlantingLogsFromProps,
+  inputInventory: availableInputsFromProps,
+  activityPlantingLinks: activityPlantingLinksFromProps, // Use this prop
+  onSubmit,
+  onCancel,
+  isSubmitting
+}: CultivationLogFormProps) {
+  const [selectedPlantingLogIds, setSelectedPlantingLogIds] = useState<string[]>([]);
   const [activityDate, setActivityDate] = useState('');
   const [activityType, setActivityType] = useState('');
-  const [plotAffected, setPlotAffected] = useState(''); // New state for plot_affected
-  const [inputInventoryId, setInputInventoryId] = useState<string | undefined>(undefined);
-  const [inputQuantityUsed, setInputQuantityUsed] = useState<number | ''>('');
-  const [inputQuantityUnit, setInputQuantityUnit] = useState('');
+  const [plotAffected, setPlotAffected] = useState('');
   const [notes, setNotes] = useState('');
-  
-  const [availablePlantingLogs, setAvailablePlantingLogs] = useState<(PlantingLog & { cropName?: string; seedBatchCode?: string; displayLabel?: string })[]>([]);
-  const [availableInputs, setAvailableInputs] = useState<InputInventory[]>([]);
+  const [usedInputs, setUsedInputs] = useState<UsedInputItem[]>([]); // State for form's used inputs
   const [formError, setFormError] = useState<string | null>(null);
-  const [selectedPlantingLogInfo, setSelectedPlantingLogInfo] = useState<{cropName?: string, plotAffected?: string} | null>(null);
+  // selectedPlantingLogInfo is no longer needed for single selection display
 
 
   const activityTypes = [
@@ -33,213 +68,241 @@ export default function CultivationLogForm({ initialData, onSubmit, onCancel, is
   ];
 
 
-  useEffect(() => {
-    const fetchFormData = async () => {
-      try {
-        const [pLogs, sBatches, crps, inputs] = await Promise.all([
-          db.plantingLogs.toArray(),
-          db.seedBatches.toArray(),
-          db.crops.toArray(),
-          db.inputInventory.orderBy('name').toArray()
-        ]);
-
-        const enrichedPlantingLogs = pLogs.map(pl => {
-          let cropName = 'N/A';
-          let seedBatchCode = 'N/A';
-          if (pl.seed_batch_id) {
-            const sBatch = sBatches.find(sb => sb.id === pl.seed_batch_id);
-            if (sBatch) {
-              seedBatchCode = sBatch.batch_code;
-              const crop = crps.find(c => c.id === sBatch.crop_id);
-              if (crop) cropName = crop.name;
-            }
-          }
-          return {
-            ...pl,
-            cropName,
-            seedBatchCode,
-            displayLabel: `${new Date(pl.planting_date).toLocaleDateString()} - ${cropName} (Batch: ${seedBatchCode}) - Plot: ${pl.plot_affected || pl.location_description || 'N/A'}`
-          };
-        });
-
-        setAvailablePlantingLogs(enrichedPlantingLogs.sort((a,b) => new Date(b.planting_date).getTime() - new Date(a.planting_date).getTime()));
-        setAvailableInputs(inputs);
-
-      } catch (error) {
-        console.error("Failed to fetch form data for cultivation logs", error);
-        setFormError("Could not load planting logs or inputs data.");
-      }
-    };
-    fetchFormData();
-  }, []); // Fetch only on mount
+  // Removed useEffect for fetching availablePlantingLogs and availableInputs, as they are now passed as props.
 
  useEffect(() => {
-    if (initialData) {
-      setPlantingLogId(initialData.planting_log_id);
-      setActivityDate(initialData.activity_date ? initialData.activity_date.split('T')[0] : '');
-      setActivityType(initialData.activity_type);
-      setPlotAffected(initialData.plot_affected || '');
-      setInputInventoryId(initialData.input_inventory_id || undefined);
-      setInputQuantityUsed(initialData.input_quantity_used ?? '');
-      setInputQuantityUnit(initialData.input_quantity_unit || '');
-      setNotes(initialData.notes || '');
-      
-      const pLog = availablePlantingLogs.find(pl => pl.id === initialData.planting_log_id);
-      if (pLog) {
-        setSelectedPlantingLogInfo({ cropName: pLog.cropName, plotAffected: pLog.plot_affected || pLog.location_description });
-        if(!initialData.plot_affected && (pLog.plot_affected || pLog.location_description)) {
-            setPlotAffected(pLog.plot_affected || pLog.location_description || '');
+    const loadInitialData = async () => {
+      if (initialLogData && initialLogData.id) {
+        setActivityDate(initialLogData.activity_date ? initialLogData.activity_date.split('T')[0] : '');
+        setActivityType(initialLogData.activity_type);
+        setPlotAffected(initialLogData.plot_affected || '');
+        setNotes(initialLogData.notes || '');
+
+        // Use activityPlantingLinksFromProps to set selectedPlantingLogIds
+        console.log('[CultivationLogForm] loadInitialData for log ID:', initialLogData.id);
+        console.log('[CultivationLogForm] received activityPlantingLinksFromProps:', JSON.stringify(activityPlantingLinksFromProps));
+        console.log('[CultivationLogForm] received availablePlantingLogsFromProps:', JSON.stringify(availablePlantingLogsFromProps.map(p => ({id: p.id, displayLabel: p.displayLabel}))));
+
+        if (activityPlantingLinksFromProps) {
+            const currentLinks = activityPlantingLinksFromProps.filter(
+                link => link.cultivation_log_id === initialLogData.id && link.is_deleted !== 1
+            );
+            console.log('[CultivationLogForm] Filtered currentLinks based on initialLogData.id:', JSON.stringify(currentLinks));
+            const plantingLogIdsToSelect = currentLinks.map(link => link.planting_log_id);
+            console.log('[CultivationLogForm] plantingLogIdsToSelect for checkboxes:', plantingLogIdsToSelect);
+            setSelectedPlantingLogIds(plantingLogIdsToSelect);
+        } else {
+            console.warn('[CultivationLogForm] activityPlantingLinksFromProps was undefined or empty. Falling back to DB query for planting links.');
+            // Fallback if prop not provided, though parent should provide it for edits
+            const linksFromDb = await db.cultivationActivityPlantingLinks
+                .where('cultivation_log_id').equals(initialLogData.id)
+                .filter(link => link.is_deleted !== 1)
+                .toArray();
+            console.log('[CultivationLogForm] linksFromDb (fallback):', JSON.stringify(linksFromDb));
+            const plantingLogIdsToSelectFromDb = linksFromDb.map(link => link.planting_log_id);
+            console.log('[CultivationLogForm] plantingLogIdsToSelectFromDb (fallback):', plantingLogIdsToSelectFromDb);
+            setSelectedPlantingLogIds(plantingLogIdsToSelectFromDb);
         }
+
+
+        // Set used inputs from initialUsedInputs prop (which should be CultivationActivityUsedInput[])
+        setUsedInputs(initialUsedInputs.map(dbLink => ({
+          id: dbLink.id, // This is the ID of the CultivationActivityUsedInput record
+          input_inventory_id: dbLink.input_inventory_id,
+          quantity_used: dbLink.quantity_used,
+          quantity_unit: dbLink.quantity_unit,
+          original_input_inventory_id: dbLink.input_inventory_id,
+          original_quantity_used: dbLink.quantity_used,
+        })));
+
+      } else {
+        // Reset form for new entry
+        setSelectedPlantingLogIds([]);
+        setActivityDate('');
+        setActivityType('');
+        setPlotAffected('');
+        setUsedInputs([]);
+        setNotes('');
       }
-
-    } else {
-      // Reset form
-      setPlantingLogId('');
-      setActivityDate('');
-      setActivityType('');
-      setPlotAffected('');
-      setInputInventoryId(undefined);
-      setInputQuantityUsed('');
-      setInputQuantityUnit('');
-      setNotes('');
-      setSelectedPlantingLogInfo(null);
-    }
-  }, [initialData, availablePlantingLogs]);
+    };
+    loadInitialData();
+  }, [initialLogData, initialUsedInputs, availablePlantingLogsFromProps, activityPlantingLinksFromProps]);
 
 
-  const handlePlantingLogChange = (selectedPlantingLogId: string) => {
-    setPlantingLogId(selectedPlantingLogId);
-    const pLog = availablePlantingLogs.find(pl => pl.id === selectedPlantingLogId);
-    if (pLog) {
-      setSelectedPlantingLogInfo({ cropName: pLog.cropName, plotAffected: pLog.plot_affected || pLog.location_description });
-      // Auto-fill plot_affected if it's empty and the selected planting log has one
-      if (!plotAffected && (pLog.plot_affected || pLog.location_description)) {
-        setPlotAffected(pLog.plot_affected || pLog.location_description || '');
+  const handlePlantingLogSelectionChange = (plantingLogId: string) => {
+    setSelectedPlantingLogIds(prevSelectedIds => {
+      if (prevSelectedIds.includes(plantingLogId)) {
+        return prevSelectedIds.filter(id => id !== plantingLogId); // Unselect
+      } else {
+        return [...prevSelectedIds, plantingLogId]; // Select
       }
-    } else {
-      setSelectedPlantingLogInfo(null);
-      // If clearing selection, should plotAffected also be cleared? User might want to keep it if manually entered.
-      // setPlotAffected('');
-    }
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setFormError(null);
-    if (!plantingLogId || !activityDate || !activityType.trim()) {
-      setFormError('Planting Log, Activity Date, and Activity Type are required.');
+
+    if (!activityDate || !activityType.trim()) {
+      setFormError('Activity Date and Activity Type are required.');
       return;
     }
-    if (inputQuantityUsed !== '' && isNaN(inputQuantityUsed)) {
-        setFormError('Input Quantity Used must be a number if provided.');
-        return;
+    if (selectedPlantingLogIds.length === 0 && !plotAffected.trim()) {
+      setFormError('Either select at least one Planting Log or specify the Plot Affected.');
+      return;
     }
-    if (inputInventoryId && (inputQuantityUsed === '' || !inputQuantityUnit.trim())) {
-        setFormError('If an input is selected, Quantity Used and Unit are required.');
+    // New validation for usedInputs array
+    for (const usedIn of usedInputs) {
+      if (!usedIn.input_inventory_id) {
+        setFormError('All added input items must have an item selected.');
         return;
-    }
-     if (!inputInventoryId && (inputQuantityUsed !== '' || inputQuantityUnit.trim())) {
-        setFormError('Quantity Used and Unit should only be filled if an input is selected.');
+      }
+      if (usedIn.quantity_used === '' || isNaN(Number(usedIn.quantity_used)) || Number(usedIn.quantity_used) <= 0) {
+        const itemName = availableInputsFromProps.find(i => i.id === usedIn.input_inventory_id)?.name || 'Selected input';
+        setFormError(`Quantity used for "${itemName}" must be a positive number.`);
         return;
+      }
+      if (!usedIn.quantity_unit.trim()) {
+        const itemName = availableInputsFromProps.find(i => i.id === usedIn.input_inventory_id)?.name || 'Selected input';
+        setFormError(`Unit for "${itemName}" is required.`);
+        return;
+      }
     }
 
-
-    const logData = {
-      planting_log_id: plantingLogId,
+    // Data for the main CultivationLog record
+    const logCoreData: Omit<CultivationLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'> = {
       activity_date: activityDate,
       activity_type: activityType.trim(),
-      plot_affected: plotAffected.trim() || undefined, // Add plot_affected to data
-      input_inventory_id: inputInventoryId || undefined,
-      input_quantity_used: inputQuantityUsed === '' ? undefined : Number(inputQuantityUsed),
-      input_quantity_unit: inputQuantityUnit.trim() || undefined,
+      plot_affected: plotAffected.trim() || undefined,
       notes: notes.trim() || undefined,
     };
+    
+    const finalLogData: CultivationLog | Omit<CultivationLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'> =
+      initialLogData?.id
+        ? { ...initialLogData, ...logCoreData } // Preserve ID and other fields if editing
+        : logCoreData;
 
-    // Handle inventory deduction
-    if (inputInventoryId && inputQuantityUsed && Number(inputQuantityUsed) > 0) {
-      const selectedInput = availableInputs.find(inv => inv.id === inputInventoryId);
-      if (!selectedInput) {
-        setFormError("Selected input item not found.");
-        return;
-      }
-      if ((selectedInput.current_quantity || 0) < Number(inputQuantityUsed)) {
-        setFormError(`Not enough ${selectedInput.name} in stock. Available: ${selectedInput.current_quantity || 0} ${selectedInput.quantity_unit || ''}`);
-        return;
-      }
-      
-      // If editing, and input/quantity changed, this logic needs to be more complex
-      // to revert old deduction and apply new one.
-      // For simplicity now, this only handles new log creation or if input didn't change on edit.
-      // A robust edit would store originalInputUsed and originalQuantityUsed.
-      if (!initialData || initialData.input_inventory_id !== inputInventoryId || initialData.input_quantity_used !== Number(inputQuantityUsed)) {
-        // This simplified logic assumes that if an input was used, its quantity is deducted.
-        // If editing changes the input or quantity, the old deduction isn't reverted here.
-        // This is a known simplification for now.
-        const newStock = (selectedInput.current_quantity || 0) - Number(inputQuantityUsed);
-        try {
-            await db.inputInventory.update(inputInventoryId, {
-                current_quantity: newStock,
-                _synced: 0,
-                _last_modified: Date.now()
-            });
-        } catch (dbError) {
-            console.error("Error updating input inventory stock:", dbError);
-            setFormError("Failed to update inventory stock. Please try again.");
-            return;
-        }
-      }
-    }
-
-
-    if (initialData?.id) {
-      // TODO: Handle inventory adjustment if input_inventory_id or input_quantity_used changed during edit.
-      // This currently doesn't revert the original deduction if the input item or quantity is changed.
-      // For a robust solution, you'd need to:
-      // 1. Store the original input_inventory_id and input_quantity_used from initialData.
-      // 2. If they changed:
-      //    a. Revert the old deduction (add back originalInputQuantityUsed to originalInputInventoryId).
-      //    b. Apply the new deduction (as done above for new logs).
-      await onSubmit({ ...initialData, ...logData });
-    } else {
-      await onSubmit(logData);
+    const formDataToSubmit: CultivationLogFormData = {
+      logData: finalLogData,
+      usedInputs: usedInputs
+        .filter(ui => !ui.is_deleted_in_form) // Filter out items marked for deletion in UI
+        .map(ui => ({
+          id: ui.id, // ID of the CultivationActivityUsedInput link
+          input_inventory_id: ui.input_inventory_id,
+          quantity_used: Number(ui.quantity_used),
+          quantity_unit: ui.quantity_unit,
+        })),
+      // The parent (page.tsx) will handle selectedPlantingLogIds to create/update CultivationActivityPlantingLink records
+    };
+    
+    try {
+      await onSubmit(formDataToSubmit); // This now sends the structured data
+      // onCancel(); // Parent will call onCancel after its own successful transaction
+    } catch (err) {
+        console.error("Error saving cultivation log and links:", err);
+        setFormError(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
     }
   };
 
+  // Use availableInputsFromProps directly
+  const displayableAvailableInputs = React.useMemo(() => {
+    if (!availableInputsFromProps.length) return [];
+
+    return availableInputsFromProps.map(inputFromDb => {
+      let allocatedInForm = 0;
+      usedInputs.forEach(usedItemInForm => {
+        // Check if the item in form matches the DB item and has a valid quantity
+        if (usedItemInForm.input_inventory_id === inputFromDb.id &&
+            usedItemInForm.quantity_used !== '' &&
+            !isNaN(Number(usedItemInForm.quantity_used))) {
+          allocatedInForm += Number(usedItemInForm.quantity_used);
+        }
+      });
+      
+      const currentStockInDb = inputFromDb.current_quantity || 0;
+      let displayStock = currentStockInDb;
+
+      const existingFormItem = usedInputs.find(ui => ui.input_inventory_id === inputFromDb.id);
+      if (existingFormItem) {
+         if (existingFormItem.original_input_inventory_id === inputFromDb.id && typeof existingFormItem.original_quantity_used === 'number') {
+             displayStock = currentStockInDb + existingFormItem.original_quantity_used - Number(existingFormItem.quantity_used || 0);
+         } else {
+             displayStock = currentStockInDb - Number(existingFormItem.quantity_used || 0);
+         }
+      }
+
+
+      return {
+        ...inputFromDb,
+        display_stock: displayStock < 0 ? 0 : displayStock, // Ensure not negative
+      };
+    // Filter to show items that still have stock OR are already selected in the form
+    }).filter(input => input.display_stock > 0 || usedInputs.some(ui => ui.input_inventory_id === input.id) );
+  }, [availableInputsFromProps, usedInputs]);
+
+  const handleAddUsedInput = () => {
+    setUsedInputs([...usedInputs, { input_inventory_id: '', quantity_used: '', quantity_unit: '' }]);
+  };
+
+  const handleRemoveUsedInput = (index: number) => {
+    setUsedInputs(usedInputs.filter((_, i) => i !== index));
+  };
+
+  const handleUsedInputChange = (index: number, field: keyof UsedInputItem, value: string | number) => {
+    const newUsedInputs = usedInputs.map((item, i) => {
+      if (i === index) {
+        const updatedItem = { ...item };
+        if (field === 'quantity_used') {
+          updatedItem[field] = value === '' ? '' : Number(value);
+        } else if (field === 'input_inventory_id' || field === 'quantity_unit') {
+          updatedItem[field] = String(value);
+        }
+        return updatedItem;
+      }
+      return item;
+    });
+    setUsedInputs(newUsedInputs);
+  };
+
+
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center p-4">
-      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg">
+      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl">
         <h2 className="text-2xl font-bold mb-6 text-gray-800">
-          {initialData ? 'Edit Cultivation Log' : 'Record Cultivation Activity'}
+          {initialLogData ? 'Edit Cultivation Log' : 'Record Cultivation Activity'}
         </h2>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-6">
           {formError && <p className="text-red-500 text-sm mb-3">{formError}</p>}
 
           <div>
-            <label htmlFor="plantingLogId" className="block text-sm font-medium text-gray-700">
-              Planting Log <span className="text-red-500">*</span>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Affected Planting Logs (select one or more, or leave blank if using "Plot Affected" only)
             </label>
-            <select
-              id="plantingLogId"
-              value={plantingLogId}
-              onChange={(e) => handlePlantingLogChange(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-              required
-              disabled={isSubmitting || availablePlantingLogs.length === 0}
-            >
-              <option value="">Select a Planting Log</option>
-              {availablePlantingLogs.map(pl => (
-                <option key={pl.id} value={pl.id}>
-                  {pl.displayLabel}
-                </option>
-              ))}
-            </select>
-            {availablePlantingLogs.length === 0 && <p className="text-xs text-gray-500 mt-1">No planting logs available. Please add one first.</p>}
-            {selectedPlantingLogInfo?.cropName && (
-              <p className="text-xs text-gray-600 mt-1">
-                Crop: {selectedPlantingLogInfo.cropName}
-                {selectedPlantingLogInfo.plotAffected && ` | Plot: ${selectedPlantingLogInfo.plotAffected}`}
-              </p>
-            )}
+            <div className="max-h-24 overflow-y-auto border border-gray-300 rounded-md p-2 space-y-1"> {/* Further reduced max-h-32 to max-h-24 */}
+              {availablePlantingLogsFromProps.length === 0 && <p className="text-xs text-gray-500">No active planting logs available.</p>}
+              {availablePlantingLogsFromProps.map(pl => {
+                const isChecked = selectedPlantingLogIds.includes(pl.id);
+                // For detailed debugging of checkbox state:
+                console.log(`[CultivationLogForm] Checkbox render: PL ID: ${pl.id}, Label: ${pl.displayLabel}, selectedIDs: ${JSON.stringify(selectedPlantingLogIds)}, isChecked: ${isChecked}`);
+                return (
+                  <div key={`checkbox-div-${pl.id}`} className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id={`pl-${pl.id}`}
+                      value={pl.id}
+                      checked={isChecked}
+                      onChange={() => handlePlantingLogSelectionChange(pl.id)}
+                      className="h-4 w-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                      disabled={isSubmitting}
+                    />
+                    <label htmlFor={`pl-${pl.id}`} className="ml-2 text-sm text-gray-700">
+                      {pl.displayLabel}
+                    </label>
+                  </div>
+                );
+              })}
+            </div>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -282,60 +345,89 @@ export default function CultivationLogForm({ initialData, onSubmit, onCancel, is
             <input
               type="text"
               id="plotAffected"
-              value={plotAffected} // This can be auto-filled or manually overridden
+              value={plotAffected}
               onChange={(e) => setPlotAffected(e.target.value)}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
               disabled={isSubmitting}
-              placeholder={selectedPlantingLogInfo?.plotAffected || "Enter plot if different"}
+              placeholder={"Enter plot details (e.g., specific rows, or general area)"}
             />
           </div>
           
           <hr className="my-2"/>
-          <p className="text-sm text-gray-600">Input Used (Optional):</p>
-
-          <div>
-            <label htmlFor="inputInventoryId" className="block text-sm font-medium text-gray-700">Input Item</label>
-            <select
-              id="inputInventoryId"
-              value={inputInventoryId || ''}
-              onChange={(e) => setInputInventoryId(e.target.value || undefined)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-              disabled={isSubmitting}
-            >
-              <option value="">Select an Input (Optional)</option>
-              {availableInputs.map(input => (
-                <option key={input.id} value={input.id}>
-                  {input.name} ({input.type || 'N/A'}) - Stock: {input.current_quantity} {input.quantity_unit || ''}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="inputQuantityUsed" className="block text-sm font-medium text-gray-700">Quantity Used</label>
-              <input
-                type="number"
-                id="inputQuantityUsed"
-                value={inputQuantityUsed}
-                onChange={(e) => setInputQuantityUsed(e.target.value === '' ? '' : parseFloat(e.target.value))}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-                disabled={isSubmitting || !inputInventoryId}
-                step="any"
-              />
+          <p className="text-sm font-medium text-gray-700 mb-1">Inputs Used (Optional):</p>
+          {usedInputs.map((usedIn, index) => (
+            <div key={index} className="p-3 border border-gray-200 rounded-md space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                <div className="md:col-span-2">
+                  <label htmlFor={`used-input-item-${index}`} className="block text-xs font-medium text-gray-600">Input Item</label>
+                  <select
+                    id={`used-input-item-${index}`}
+                    value={usedIn.input_inventory_id}
+                    onChange={(e) => handleUsedInputChange(index, 'input_inventory_id', e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                    disabled={isSubmitting}
+                  >
+                    <option value="">Select Item</option>
+                    {displayableAvailableInputs.map(input => {
+                      const isSelectedInThisRow = usedIn.input_inventory_id === input.id;
+                      return (
+                        <option
+                          key={input.id}
+                          value={input.id}
+                          disabled={!isSelectedInThisRow && input.display_stock <= 0}
+                        >
+                          {input.name} ({input.type || 'N/A'})
+                          {input.purchase_date ? ` - P:${new Date(input.purchase_date).toLocaleDateString()}` : ''}
+                          {' '}- Stock: {input.display_stock ?? 'N/A'} {input.quantity_unit || ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveUsedInput(index)}
+                  className="px-3 py-2 text-xs font-medium text-red-700 bg-red-100 hover:bg-red-200 rounded-md border border-red-300 disabled:opacity-50"
+                  disabled={isSubmitting}
+                >
+                  Remove
+                </button>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor={`used-input-qty-${index}`} className="block text-xs font-medium text-gray-600">Quantity Used</label>
+                  <input
+                    type="number"
+                    id={`used-input-qty-${index}`}
+                    value={usedIn.quantity_used}
+                    onChange={(e) => handleUsedInputChange(index, 'quantity_used', e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                    disabled={isSubmitting || !usedIn.input_inventory_id}
+                    step="any"
+                  />
+                </div>
+                <div>
+                  <label htmlFor={`used-input-unit-${index}`} className="block text-xs font-medium text-gray-600">Unit</label>
+                  <input
+                    type="text"
+                    id={`used-input-unit-${index}`}
+                    value={usedIn.quantity_unit}
+                    onChange={(e) => handleUsedInputChange(index, 'quantity_unit', e.target.value)}
+                    className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                    disabled={isSubmitting || !usedIn.input_inventory_id}
+                  />
+                </div>
+              </div>
             </div>
-            <div>
-              <label htmlFor="inputQuantityUnit" className="block text-sm font-medium text-gray-700">Unit</label>
-              <input
-                type="text"
-                id="inputQuantityUnit"
-                value={inputQuantityUnit}
-                onChange={(e) => setInputQuantityUnit(e.target.value)}
-                className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
-                disabled={isSubmitting || !inputInventoryId}
-              />
-            </div>
-          </div>
+          ))}
+          <button
+            type="button"
+            onClick={handleAddUsedInput}
+            disabled={isSubmitting}
+            className="mt-2 px-4 py-2 text-sm font-medium text-green-700 bg-green-100 hover:bg-green-200 rounded-md border border-green-300 disabled:opacity-50"
+          >
+            + Add Input Item
+          </button>
 
           <div>
             <label htmlFor="notes" className="block text-sm font-medium text-gray-700">Notes</label>
@@ -344,12 +436,12 @@ export default function CultivationLogForm({ initialData, onSubmit, onCancel, is
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm disabled:bg-gray-50"
               disabled={isSubmitting}
             />
           </div>
 
-          <div className="flex items-center justify-end space-x-3 pt-2">
+          <div className="flex items-center justify-end space-x-3 pt-4 border-t border-gray-200 mt-6">
             <button
               type="button"
               onClick={onCancel}
@@ -360,10 +452,10 @@ export default function CultivationLogForm({ initialData, onSubmit, onCancel, is
             </button>
             <button
               type="submit"
-              disabled={isSubmitting || (availablePlantingLogs.length === 0 && !initialData)}
+              disabled={isSubmitting || (availablePlantingLogsFromProps.length === 0 && !initialLogData)}
               className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50"
             >
-              {isSubmitting ? (initialData ? 'Saving...' : 'Recording...') : (initialData ? 'Save Changes' : 'Record Activity')}
+              {isSubmitting ? (initialLogData ? 'Saving...' : 'Recording...') : (initialLogData ? 'Save Changes' : 'Record Activity')}
             </button>
           </div>
         </form>

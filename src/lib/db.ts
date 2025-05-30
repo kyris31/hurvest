@@ -102,7 +102,7 @@ export interface PlantingLog {
   seedling_production_log_id?: string; 
   seed_batch_id?: string; 
   input_inventory_id?: string; 
-  purchased_seedling_id?: string; // Added for linking to purchased_seedlings table
+  purchased_seedling_id?: string; 
   planting_date: string; 
   location_description?: string; 
   plot_affected?: string; 
@@ -110,15 +110,15 @@ export interface PlantingLog {
   quantity_unit?: string; 
   expected_harvest_date?: string; 
   notes?: string;
-  status?: string; // 'active', 'completed', 'terminated'
-  actual_end_date?: string; // YYYY-MM-DD
+  status?: string; 
+  actual_end_date?: string; 
   created_at?: string;
   updated_at?: string;
   _synced?: number;
   _last_modified?: number;
   is_deleted?: number;
   deleted_at?: string;
-  crop_plan_id?: string; // Link to CropPlan
+  crop_plan_id?: string; 
 }
 
 export interface CropPlan {
@@ -128,10 +128,10 @@ export interface CropPlan {
   plot_id?: string;
   crop_season_id: string;
   planting_type: 'DIRECT_SEED' | 'TRANSPLANT_NURSERY' | 'TRANSPLANT_PURCHASED';
-  planned_sowing_date?: string; // YYYY-MM-DD
-  planned_transplant_date?: string; // YYYY-MM-DD
-  planned_first_harvest_date?: string; // YYYY-MM-DD
-  planned_last_harvest_date?: string; // YYYY-MM-DD
+  planned_sowing_date?: string; 
+  planned_transplant_date?: string; 
+  planned_first_harvest_date?: string; 
+  planned_last_harvest_date?: string; 
   estimated_days_to_maturity?: number;
   target_quantity_plants?: number;
   target_quantity_area_sqm?: number;
@@ -152,13 +152,12 @@ export interface CropPlanStage {
   crop_plan_id: string;
   stage_name: string;
   stage_type: 'NURSERY_SOWING' | 'NURSERY_POTTING_ON' | 'DIRECT_SEEDING' | 'SOIL_PREPARATION' | 'TRANSPLANTING' | 'FIELD_MAINTENANCE' | 'PEST_DISEASE_CONTROL' | 'HARVEST_WINDOW';
-  planned_start_date: string; // YYYY-MM-DD
+  planned_start_date: string; 
   planned_duration_days: number;
-  actual_start_date?: string; // YYYY-MM-DD
-  actual_end_date?: string; // YYYY-MM-DD
+  actual_start_date?: string; 
+  actual_end_date?: string; 
   status?: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'SKIPPED';
   notes?: string;
-
   nursery_total_days?: number;
   nursery_seeding_tray_type?: string;
   nursery_seeds_per_cell?: number;
@@ -166,24 +165,20 @@ export interface CropPlanStage {
   nursery_seeding_technique?: string;
   nursery_days_before_repotting?: number;
   nursery_repotting_container_type?: string;
-
   direct_seed_rows_per_bed?: number;
   direct_seed_seeder_type?: string;
   direct_seed_spacing_in_row_cm?: number;
   direct_seed_spacing_between_rows_cm?: number;
   direct_seed_depth_cm?: number;
   direct_seed_calibration?: string;
-
   transplant_rows_per_bed?: number;
   transplant_spacing_in_row_cm?: number;
   transplant_spacing_between_rows_cm?: number;
   transplant_source_container_type?: string;
   transplant_row_marking_method?: string;
   transplant_irrigation_details?: string;
-
   generic_field_task_details?: string;
-  additional_details_json?: string; // Store as string, parse/stringify in app
-
+  additional_details_json?: string; 
   created_at?: string;
   updated_at?: string;
   is_deleted?: number;
@@ -196,10 +191,10 @@ export interface CropPlanTask {
   id: string; // UUID
   crop_plan_stage_id: string;
   task_description: string;
-  planned_due_date: string; // YYYY-MM-DD
-  actual_completion_date?: string; // YYYY-MM-DD
+  planned_due_date: string; 
+  actual_completion_date?: string; 
   status?: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'BLOCKED' | 'CANCELLED';
-  assigned_to_user_id?: string; // Assuming user IDs are strings (UUIDs)
+  assigned_to_user_id?: string; 
   notes?: string;
   created_at?: string;
   updated_at?: string;
@@ -212,8 +207,8 @@ export interface CropPlanTask {
 export interface CropSeason {
   id: string; // UUID
   name: string;
-  start_date: string; // YYYY-MM-DD
-  end_date: string; // YYYY-MM-DD
+  start_date: string; 
+  end_date: string; 
   description?: string;
   created_at?: string;
   updated_at?: string;
@@ -225,15 +220,12 @@ export interface CropSeason {
 
 export interface CultivationLog {
   id: string; // UUID
-  planting_log_id: string;
-  activity_date: string; 
-  activity_type: string; 
-  plot_affected?: string; 
-  input_inventory_id?: string; 
-  input_quantity_used?: number;
-  input_quantity_unit?: string;
+  user_id?: string; // Added for RLS ownership
+  activity_date: string;
+  activity_type: string;
+  plot_affected?: string;
   notes?: string;
-  created_at?: string; 
+  created_at?: string;
   updated_at?: string; 
   _synced?: number; 
   _last_modified?: number;
@@ -241,13 +233,39 @@ export interface CultivationLog {
   deleted_at?: string;
 }
 
+export interface CultivationActivityPlantingLink {
+  id: string; // UUID
+  cultivation_log_id: string; 
+  planting_log_id: string;  
+  created_at?: string;
+  updated_at?: string;
+  _synced?: number;
+  _last_modified?: number;
+  is_deleted?: number;
+  deleted_at?: string;
+}
+
+export interface CultivationActivityUsedInput {
+  id: string; // UUID
+  cultivation_log_id: string; 
+  input_inventory_id: string; 
+  quantity_used: number;
+  quantity_unit: string;
+  created_at?: string;
+  updated_at?: string;
+  _synced?: number;
+  _last_modified?: number;
+  is_deleted?: number;
+  deleted_at?: string;
+}
+
 export interface HarvestLog {
   id: string; // UUID
-  planting_log_id?: string; // Made optional
-  tree_id?: string; // Added for harvests from trees
+  planting_log_id?: string; 
+  tree_id?: string; 
   harvest_date: string;
   quantity_harvested: number;
-  current_quantity_available?: number; // Added to track remaining stock from this harvest
+  current_quantity_available?: number; 
   quantity_unit: string;
   quality_grade?: string;
   notes?: string;
@@ -294,9 +312,9 @@ export interface Sale {
 export interface SaleItem {
   id: string; // UUID
   sale_id: string;
-  harvest_log_id?: string; // For items sold from own harvest
-  input_inventory_id?: string; // For items sold directly from purchased inventory
-  purchased_seedling_id?: string; // Added for items sold from purchased seedlings
+  harvest_log_id?: string; 
+  input_inventory_id?: string; 
+  purchased_seedling_id?: string; 
   quantity_sold: number;
   price_per_unit: number;
   discount_type?: 'Amount' | 'Percentage' | null;
@@ -479,22 +497,22 @@ export interface PreventiveMeasureSchedule {
 
 export interface SupplierInvoice {
   id: string; // UUID
-  supplier_id: string; // FK to Suppliers
-  invoice_number: string; // Supplier's invoice number
-  invoice_date: string; // ISOString Date
-  due_date?: string; // ISOString Date
-  total_amount_gross?: number; // Sum of line items before overall discount/VAT
+  supplier_id: string; 
+  invoice_number: string; 
+  invoice_date: string; 
+  due_date?: string; 
+  total_amount_gross?: number; 
   discount_amount?: number;
   discount_percentage?: number;
   shipping_cost?: number;
   other_charges?: number;
-  subtotal_after_adjustments?: number; // Gross - Discount + Shipping + Other
+  subtotal_after_adjustments?: number; 
   total_vat_amount?: number;
-  total_amount_net: number; // The final amount payable for the invoice
-  currency?: string; // e.g., EUR
+  total_amount_net: number; 
+  currency?: string; 
   status: 'draft' | 'pending_processing' | 'processed' | 'partially_paid' | 'paid' | 'cancelled';
   notes?: string;
-  file_attachment_url?: string; // URL to a scanned copy
+  file_attachment_url?: string; 
   created_at?: string;
   updated_at?: string;
   _synced?: number;
@@ -506,16 +524,16 @@ export interface SupplierInvoice {
 export interface PurchasedSeedling {
   id: string; // UUID
   name: string;
-  crop_id?: string; // FK to crops.id
-  supplier_id?: string; // FK to suppliers.id
-  purchase_date?: string; // YYYY-MM-DD
+  crop_id?: string; 
+  supplier_id?: string; 
+  purchase_date?: string; 
   initial_quantity: number;
   current_quantity: number;
   quantity_unit?: string;
   cost_per_unit?: number;
   total_purchase_cost?: number;
   notes?: string;
-  user_id?: string; // Should match auth.uid()
+  user_id?: string; 
   created_at?: string;
   updated_at?: string;
   _synced?: number;
@@ -526,46 +544,26 @@ export interface PurchasedSeedling {
 
 export interface SupplierInvoiceItem {
   id: string; // UUID
-  supplier_invoice_id: string; // FK to SupplierInvoices
-  input_inventory_id?: string; // FK to InputInventory (once matched/created)
+  supplier_invoice_id: string; 
+  input_inventory_id?: string; 
   description_from_invoice: string;
-  
-  package_quantity: number; // Number of packages/containers purchased
-  package_unit_of_measure?: string; // e.g., "bottle", "bag", "case"
-
-  item_quantity_per_package?: number; // e.g., 20 (if package_unit_of_measure is 'bottle' and item_unit_of_measure is 'L')
-  item_unit_of_measure?: string; // e.g., "L", "kg", "ml" - the unit of the actual item content
-
-  price_per_package_gross: number; // Price for one package/container
-  
-  line_total_gross?: number; // package_quantity * price_per_package_gross
-  
-  // Item-specific discount fields
-  item_discount_type?: 'Percentage' | 'Amount' | ''; // Type of discount applied at the item level
-  item_discount_value?: number; // Value of the item-level discount
-
-  subtotal_before_item_vat?: number;     // Cost of item after item-specific discount, but BEFORE item-specific VAT
-  // Cost after item-specific discount and item-specific VAT
-  cost_after_item_adjustments?: number;  // This should be subtotal_before_item_vat + item_vat_amount
-
-  // Apportioned invoice-level costs
-  apportioned_discount_amount?: number; // Apportioned from overall invoice discount
-  apportioned_shipping_cost?: number;   // Apportioned from overall invoice shipping
-  apportioned_other_charges?: number; // Apportioned from overall invoice other charges
-  
-  // Subtotal after item-specific costs AND invoice-level apportionments (excluding invoice-level VAT)
+  package_quantity: number; 
+  package_unit_of_measure?: string; 
+  item_quantity_per_package?: number; 
+  item_unit_of_measure?: string; 
+  price_per_package_gross: number; 
+  line_total_gross?: number; 
+  item_discount_type?: 'Percentage' | 'Amount' | ''; 
+  item_discount_value?: number; 
+  subtotal_before_item_vat?: number;     
+  cost_after_item_adjustments?: number;  
+  apportioned_discount_amount?: number; 
+  apportioned_shipping_cost?: number;   
+  apportioned_other_charges?: number; 
   line_subtotal_after_apportionment?: number;
-  
-  // Item-specific VAT
-  item_vat_percentage?: number; // VAT percentage applied specifically to this item
-  item_vat_amount?: number; // VAT amount calculated specifically for this item (based on subtotal_before_item_vat)
-  
-  // Note: The overall invoice VAT will be apportioned and added to line_subtotal_after_apportionment
-  // to get the final line_total_net.
-  // The `vat_percentage` and `vat_amount_on_line` fields from the original schema are now
-  // `item_vat_percentage` and `item_vat_amount` respectively.
-
-  line_total_net: number; // Final cost for this line item, basis for InputInventory.total_purchase_cost
+  item_vat_percentage?: number; 
+  item_vat_amount?: number; 
+  line_total_net: number; 
   notes?: string;
   created_at?: string;
   updated_at?: string;
@@ -593,18 +591,20 @@ export type HurvesthubTableName =
   | 'reminders'
   | 'seedlingProductionLogs'
   | 'flocks'
-  | 'flock_records' // Corrected from flockRecords if Supabase table is snake_case
-  | 'feed_logs'   // Corrected from feedLogs
-  | 'preventive_measure_schedules' // Corrected
+  | 'flock_records' 
+  | 'feed_logs'   
+  | 'preventive_measure_schedules' 
   | 'supplierInvoices'
   | 'supplierInvoiceItems'
-  | 'purchasedSeedlings' // Added new table name
+  | 'purchasedSeedlings' 
   | 'plots'
   | 'cropSeasons'
   | 'cropPlans'
   | 'cropPlanStages'
-  | 'cropPlanTasks' // Added new planning tables
-  | 'plannedStageResources'; // Added new table for stage resources
+  | 'cropPlanTasks' 
+  | 'plannedStageResources'
+  | 'cultivationActivityPlantingLinks'
+  | 'cultivationActivityUsedInputs';
 
 export class HurvesthubDB extends Dexie {
   crops!: Table<Crop, string>;
@@ -612,6 +612,8 @@ export class HurvesthubDB extends Dexie {
   inputInventory!: Table<InputInventory, string>;
   plantingLogs!: Table<PlantingLog, string>;
   cultivationLogs!: Table<CultivationLog, string>;
+  cultivationActivityPlantingLinks!: Table<CultivationActivityPlantingLink, string>;
+  cultivationActivityUsedInputs!: Table<CultivationActivityUsedInput, string>; 
   harvestLogs!: Table<HarvestLog, string>;
   customers!: Table<Customer, string>;
   sales!: Table<Sale, string>;
@@ -623,9 +625,9 @@ export class HurvesthubDB extends Dexie {
   seedlingProductionLogs!: Table<SeedlingProductionLog, string>;
   suppliers!: Table<Supplier, string>; 
   flocks!: Table<Flock, string>;
-  flock_records!: Table<FlockRecord, string>; // Dexie table name (property name)
-  feed_logs!: Table<FeedLog, string>;         // Dexie table name (property name)
-  preventive_measure_schedules!: Table<PreventiveMeasureSchedule, string>; // Dexie table name
+  flock_records!: Table<FlockRecord, string>; 
+  feed_logs!: Table<FeedLog, string>;         
+  preventive_measure_schedules!: Table<PreventiveMeasureSchedule, string>; 
   supplierInvoices!: Table<SupplierInvoice, string>;
   supplierInvoiceItems!: Table<SupplierInvoiceItem, string>;
   purchasedSeedlings!: Table<PurchasedSeedling, string>;
@@ -638,8 +640,14 @@ export class HurvesthubDB extends Dexie {
 
   constructor() {
     super('HurvesthubDB');
+    console.log('[HurvesthubDB] Constructor: Initialized super("HurvesthubDB").');
+
+    this.on('blocked', () => {
+      console.warn('[HurvesthubDB] Database open operation is blocked. Another tab might be holding it open with an older version.');
+    });
+
+    console.log('[HurvesthubDB] Constructor: About to define versions.');
     
-    // Version 1 (Original minimal schema)
     this.version(1).stores({
       crops: 'id, name, type, _last_modified, _synced',
       seedBatches: 'id, crop_id, batch_code, _last_modified, _synced',
@@ -653,7 +661,6 @@ export class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced',
       syncMeta: 'id',
     });
-    // Version 2: Added is_deleted and customer_type
     this.version(2).stores({
       crops: 'id, name, type, _last_modified, _synced, is_deleted',
       seedBatches: 'id, crop_id, batch_code, _last_modified, _synced, is_deleted',
@@ -672,7 +679,6 @@ export class HurvesthubDB extends Dexie {
         await tx.table(tableName as HurvesthubTableName).toCollection().modify(record => { if (record.is_deleted === undefined) record.is_deleted = 0; });
       }
     });
-    // Version 3: Added variety to seedBatches, plot_affected to planting/cultivation
     this.version(3).stores({
       customers: 'id, name, customer_type, _last_modified, _synced, is_deleted', 
       seedBatches: 'id, crop_id, batch_code, variety, _last_modified, _synced, is_deleted', 
@@ -688,7 +694,6 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => {
       await tx.table("customers").toCollection().modify(customer => { if (customer.customer_type === undefined) customer.customer_type = 'Individual';});
     });
-    // Version 4: Added total_purchase_cost to inputInventory
     this.version(4).stores({
       plantingLogs: 'id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, _last_modified, _synced, is_deleted', 
@@ -702,7 +707,6 @@ export class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
       syncMeta: 'id',
     });
-    // Version 5: Added trees table, discount fields to saleItems
     this.version(5).stores({
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       saleItems: 'id, sale_id, harvest_log_id, discount_type, discount_value, _last_modified, _synced, is_deleted',
@@ -723,10 +727,8 @@ export class HurvesthubDB extends Dexie {
         } else if (item.cost_per_unit !== undefined && (item.initial_quantity === undefined || item.initial_quantity === 0) ) {
             item.total_purchase_cost = item.cost_per_unit;
         }
-        // delete item.cost_per_unit; // This was part of a previous schema version, ensure it's handled if this upgrade runs on such DBs
       });
     });
-    // Version 6: Added variety to crops
     this.version(6).stores({
       crops: 'id, name, variety, type, _last_modified, _synced, is_deleted', 
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
@@ -743,7 +745,6 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => {
       await tx.table('crops').toCollection().modify(crop => { if (crop.variety === undefined) crop.variety = null; });
     });
-    // Version 7: Added notes to crops
     this.version(7).stores({
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
@@ -760,7 +761,6 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => {
       await tx.table('crops').toCollection().modify(crop => { if (crop.notes === undefined) crop.notes = null; });
     });
-    // Version 8: Removed variety from seedBatches
     this.version(8).stores({
       seedBatches: 'id, crop_id, batch_code, _last_modified, _synced, is_deleted', 
       crops: 'id, name, variety, type, notes, _last_modified, _synced, is_deleted',
@@ -777,7 +777,6 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => {
       await tx.table('seedBatches').toCollection().modify((sb: any) => { delete sb.variety; });
     });
-    // Version 9: Added initial_quantity, current_quantity to seedBatches & inputInventory
     this.version(9).stores({
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, initial_quantity, _last_modified, _synced, is_deleted',
@@ -795,7 +794,6 @@ export class HurvesthubDB extends Dexie {
       await tx.table('seedBatches').toCollection().modify(sb => { if (sb.current_quantity === undefined) sb.current_quantity = sb.initial_quantity; });
       await tx.table('inputInventory').toCollection().modify(ii => { if (ii.current_quantity === undefined) ii.current_quantity = ii.initial_quantity; });
     });
-    // Version 10: Added reminders table
     this.version(10).stores({
       reminders: 'id, planting_log_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, _last_modified, _synced, is_deleted', 
@@ -811,7 +809,6 @@ export class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
       syncMeta: 'id',
     });
-    // Version 11: Added qr_code_data to seedBatches and inputInventory
     this.version(11).stores({
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, initial_quantity, qr_code_data, _last_modified, _synced, is_deleted',
@@ -830,7 +827,6 @@ export class HurvesthubDB extends Dexie {
         await tx.table('seedBatches').toCollection().modify(sb => { if (sb.qr_code_data === undefined) sb.qr_code_data = null; });
         await tx.table('inputInventory').toCollection().modify(ii => { if (ii.qr_code_data === undefined) ii.qr_code_data = null; });
     });
-    // Version 12: Added seedlingProductionLogs table, seedling_production_log_id to plantingLogs
     this.version(12).stores({
       seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
       plantingLogs: 'id, seedling_production_log_id, seed_batch_id, planting_date, plot_affected, _last_modified, _synced, is_deleted',
@@ -851,7 +847,6 @@ export class HurvesthubDB extends Dexie {
         if (pl.seedling_production_log_id === undefined) pl.seedling_production_log_id = null;
       });
     });
-    // Version 13: Added supplier_id to seedBatches and inputInventory
     this.version(13).stores({
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, total_purchase_cost, current_quantity, initial_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
@@ -877,7 +872,6 @@ export class HurvesthubDB extends Dexie {
             if (ii.supplier_id === undefined) ii.supplier_id = null; 
         });
     });
-    // Version 14: Added suppliers table
     this.version(14).stores({
       suppliers: 'id, name, _last_modified, _synced, is_deleted',
       seedBatches: 'id, crop_id, batch_code, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted', 
@@ -895,7 +889,6 @@ export class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
       syncMeta: 'id',
     });
-    // Version 15: Added input_inventory_id to cultivationLogs
     this.version(15).stores({
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
       suppliers: 'id, name, _last_modified, _synced, is_deleted',
@@ -915,7 +908,6 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => {
       await tx.table('cultivationLogs').toCollection().modify(cl => { if (cl.input_inventory_id === undefined) cl.input_inventory_id = null; });
     });
-    // Version 16: Added supplier_invoice_number to inputInventory
     this.version(16).stores({
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, initial_quantity, qr_code_data, _last_modified, _synced, is_deleted', 
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
@@ -935,7 +927,6 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => {
       await tx.table('inputInventory').toCollection().modify(ii => { if (ii.supplier_invoice_number === undefined) ii.supplier_invoice_number = null; });
     });
-    // Version 17: Added flocks, flock_records, feed_logs tables
     this.version(17).stores({
       flocks: 'id, name, flock_type, hatch_date, _last_modified, _synced, is_deleted', 
       flock_records: 'id, flock_id, record_type, record_date, _last_modified, _synced, is_deleted',
@@ -956,7 +947,6 @@ export class HurvesthubDB extends Dexie {
       invoices: 'id, sale_id, invoice_number, _last_modified, _synced, is_deleted',
       syncMeta: 'id',
     });
-    // Version 18: Added minimum_stock_level to inputInventory, feed_cost to feed_logs
     this.version(18).stores({
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
       feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted', 
@@ -980,7 +970,6 @@ export class HurvesthubDB extends Dexie {
       await tx.table('inputInventory').toCollection().modify(item => { if (item.minimum_stock_level === undefined) item.minimum_stock_level = null; });
       await tx.table('feed_logs').toCollection().modify(log => { if (log.feed_cost === undefined) log.feed_cost = null; });
     });
-    // Version 19: Added weight_kg_total to flock_records
     this.version(19).stores({
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
@@ -1003,7 +992,6 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => {
       await tx.table('flock_records').toCollection().modify(record => { if (record.weight_kg_total === undefined) record.weight_kg_total = null; });
     });
-    // Version 20: Added cost to flock_records
     this.version(20).stores({
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, _last_modified, _synced, is_deleted', 
       inputInventory: 'id, name, type, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
@@ -1026,7 +1014,6 @@ export class HurvesthubDB extends Dexie {
     }).upgrade(async tx => {
       await tx.table('flock_records').toCollection().modify(record => { if (record.cost === undefined) record.cost = null; });
     });
-    // Version 21: Added revenue to flock_records, flock_id to reminders
     this.version(21).stores({
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted', 
       reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted', 
@@ -1050,7 +1037,6 @@ export class HurvesthubDB extends Dexie {
       await tx.table('flock_records').toCollection().modify(record => { if (record.revenue === undefined) record.revenue = null; });
       await tx.table('reminders').toCollection().modify(reminder => { if (reminder.flock_id === undefined) reminder.flock_id = null; });
     });
-    // Version 22: Added preventive_measure_schedules table
     this.version(22).stores({
       preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
       flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
@@ -1072,7 +1058,6 @@ export class HurvesthubDB extends Dexie {
       trees: 'id, identifier, species, variety, planting_date, plot_affected, _last_modified, _synced, is_deleted',
       seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted'
     });
-    // Version 23: Added species to flocks
     this.version(23).stores({
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
       preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
@@ -1098,7 +1083,6 @@ export class HurvesthubDB extends Dexie {
         if (flock.species === undefined) flock.species = 'chicken'; 
       });
     });
-    // Version 24: Added payment fields to sales
     this.version(24).stores({
       sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted', 
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
@@ -1126,7 +1110,6 @@ export class HurvesthubDB extends Dexie {
         if (sale.amount_paid === undefined) sale.amount_paid = 0; 
       });
     });
-    // Version 25: Added payment_history to sales
     this.version(25).stores({
       sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted', 
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
@@ -1154,7 +1137,6 @@ export class HurvesthubDB extends Dexie {
         }
       });
     });
-    // Version 26: Added source_type, date_added_to_inventory to seedBatches
     this.version(26).stores({
       seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
       sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
@@ -1187,7 +1169,6 @@ export class HurvesthubDB extends Dexie {
       });
       console.log("Finished upgrading HurvesthubDB to version 26.");
     });
-    // Version 27: Added crop_id to inputInventory, input_inventory_id to plantingLogs (already there but ensuring schema consistency)
     this.version(27).stores({
       inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted', 
       plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
@@ -1218,9 +1199,6 @@ export class HurvesthubDB extends Dexie {
       });
       console.log("Finished upgrading HurvesthubDB to version 27.");
     });
-
-    // Version 28: Added SupplierInvoices and SupplierInvoiceItems tables
-    // Also added cost_per_unit to inputInventory
     this.version(28).stores({
       supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
       supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
@@ -1258,16 +1236,13 @@ export class HurvesthubDB extends Dexie {
             }
         });
         console.log("Finished upgrading HurvesthubDB to version 28.");
-        return Promise.resolve(); // Ensure upgrade function returns a promise
+        return Promise.resolve(); 
     });
-
-    // Version 29: Added purchasedSeedlings table
     this.version(29).stores({
-      // Copied from version 28
       supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
       supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
       inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
-      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', // Added purchased_seedling_id
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
       sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
       flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
@@ -1279,23 +1254,19 @@ export class HurvesthubDB extends Dexie {
       cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
       harvestLogs: 'id, planting_log_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
       customers: 'id, name, customer_type, is_deleted, _last_modified, _synced',
-      saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced', // Added purchased_seedling_id
+      saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced', 
       invoices: 'id, sale_id, invoice_number, is_deleted, _last_modified, _synced',
       syncMeta: 'id',
       trees: 'id, identifier, species, variety, planting_date, plot_affected, is_deleted, _last_modified, _synced',
       reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
       seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
-      // New table
       purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
     }).upgrade(tx => {
       console.log("Upgrading HurvesthubDB to version 29. (Schema for purchasedSeedlings added)");
-      // Dexie automatically creates the new 'purchasedSeedlings' table.
       return Promise.resolve();
     });
-// Version 30: Added status and actual_end_date to plantingLogs
     this.version(30).stores({
-      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted', // Added status
-      // Carry over all other tables from version 29
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
       supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
       inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
@@ -1318,11 +1289,10 @@ export class HurvesthubDB extends Dexie {
       seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
       purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
     }).upgrade(async tx => {
-      // Upgrade path for plantingLogs: ensure status and actual_end_date exist
       console.log("Upgrading HurvesthubDB to version 30: Adding 'status' and 'actual_end_date' to plantingLogs.");
       await tx.table('plantingLogs').toCollection().modify(pl => {
         if (pl.status === undefined) {
-          pl.status = 'active'; // Default new plantations to 'active'
+          pl.status = 'active'; 
         }
         if (pl.actual_end_date === undefined) {
           pl.actual_end_date = null;
@@ -1330,18 +1300,13 @@ export class HurvesthubDB extends Dexie {
       });
       console.log("Finished upgrading HurvesthubDB to version 30.");
     });
-
-    // Version 31: Added Crop Planning tables and crop_plan_id to plantingLogs
     this.version(31).stores({
       plots: 'id, name, status, _last_modified, _synced, is_deleted',
       cropSeasons: 'id, name, start_date, end_date, _last_modified, _synced, is_deleted',
       cropPlans: 'id, crop_id, plot_id, crop_season_id, status, planned_sowing_date, planned_transplant_date, _last_modified, _synced, is_deleted',
       cropPlanStages: 'id, crop_plan_id, stage_type, status, planned_start_date, _last_modified, _synced, is_deleted',
       cropPlanTasks: 'id, crop_plan_stage_id, status, planned_due_date, assigned_to_user_id, _last_modified, _synced, is_deleted',
-      
-      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, crop_plan_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted', // Added crop_plan_id
-
-      // Carry over all other tables from version 30
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, crop_plan_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted', 
       supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
       supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
       inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
@@ -1365,8 +1330,6 @@ export class HurvesthubDB extends Dexie {
       purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
     }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB to version 31: Adding Crop Planning tables and crop_plan_id to plantingLogs.");
-      // Dexie automatically creates new tables.
-      // For plantingLogs, ensure crop_plan_id exists if upgrading from a version where it didn't.
       await tx.table('plantingLogs').toCollection().modify(pl => {
         if (pl.crop_plan_id === undefined) {
           pl.crop_plan_id = null;
@@ -1374,12 +1337,8 @@ export class HurvesthubDB extends Dexie {
       });
       console.log("Finished upgrading HurvesthubDB to version 31.");
     });
-
-    // Version 32: Added plannedStageResources table
     this.version(32).stores({
       plannedStageResources: 'id, crop_plan_stage_id, resource_type, input_inventory_id, _last_modified, _synced, is_deleted',
-      
-      // Carry over all other tables from version 31
       plots: 'id, name, status, _last_modified, _synced, is_deleted',
       cropSeasons: 'id, name, start_date, end_date, _last_modified, _synced, is_deleted',
       cropPlans: 'id, crop_id, plot_id, crop_season_id, status, planned_sowing_date, planned_transplant_date, _last_modified, _synced, is_deleted',
@@ -1397,8 +1356,8 @@ export class HurvesthubDB extends Dexie {
       feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
       suppliers: 'id, name, is_deleted, _last_modified, _synced',
       crops: 'id, name, variety, type, notes, is_deleted, _last_modified, _synced',
-      cultivationLogs: 'id, planting_log_id, activity_date, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
-      harvestLogs: 'id, planting_log_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
+      cultivationLogs: 'id, planting_log_id, activity_date, activity_type, plot_affected, input_inventory_id, _last_modified, _synced, is_deleted',
+      harvestLogs: 'id, planting_log_id, tree_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
       customers: 'id, name, customer_type, is_deleted, _last_modified, _synced',
       saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced',
       invoices: 'id, sale_id, invoice_number, is_deleted, _last_modified, _synced',
@@ -1409,22 +1368,149 @@ export class HurvesthubDB extends Dexie {
       purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
     }).upgrade(async tx => {
       console.log("Upgrading HurvesthubDB to version 32: Adding plannedStageResources table.");
-      // Dexie automatically creates new tables. No data migration needed for existing tables for this version.
     });
+    this.version(33).stores({
+      plannedStageResources: 'id, crop_plan_stage_id, resource_type, input_inventory_id, _last_modified, _synced, is_deleted',
+      plots: 'id, name, status, _last_modified, _synced, is_deleted',
+      cropSeasons: 'id, name, start_date, end_date, _last_modified, _synced, is_deleted',
+      cropPlans: 'id, crop_id, plot_id, crop_season_id, status, planned_sowing_date, planned_transplant_date, _last_modified, _synced, is_deleted',
+      cropPlanStages: 'id, crop_plan_id, stage_type, status, planned_start_date, _last_modified, _synced, is_deleted',
+      cropPlanTasks: 'id, crop_plan_stage_id, status, planned_due_date, assigned_to_user_id, _last_modified, _synced, is_deleted',
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, crop_plan_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
+      supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
+      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+      seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
+      flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+      preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+      flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+      feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+      suppliers: 'id, name, is_deleted, _last_modified, _synced',
+      crops: 'id, name, variety, type, notes, is_deleted, _last_modified, _synced',
+      cultivationLogs: 'id, activity_date, activity_type, plot_affected, _last_modified, _synced, is_deleted', 
+      cultivationActivityPlantingLinks: 'id, cultivation_log_id, planting_log_id, _last_modified, _synced, is_deleted, &[cultivation_log_id+planting_log_id]',
+      cultivationActivityUsedInputs: 'id, cultivation_log_id, input_inventory_id, quantity_used, quantity_unit, _last_modified, _synced, is_deleted, &[cultivation_log_id+input_inventory_id]',
+      harvestLogs: 'id, planting_log_id, tree_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
+      customers: 'id, name, customer_type, is_deleted, _last_modified, _synced',
+      saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced',
+      invoices: 'id, sale_id, invoice_number, is_deleted, _last_modified, _synced',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, is_deleted, _last_modified, _synced',
+      reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
+      purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
+    }).upgrade(async tx => {
+      console.log("Upgrading HurvesthubDB to version 33: Modifying cultivationLogs and adding link tables.");
+    });
+
+    this.version(34).stores({
+      plannedStageResources: 'id, crop_plan_stage_id, resource_type, input_inventory_id, _last_modified, _synced, is_deleted',
+      plots: 'id, name, status, _last_modified, _synced, is_deleted',
+      cropSeasons: 'id, name, start_date, end_date, _last_modified, _synced, is_deleted',
+      cropPlans: 'id, crop_id, plot_id, crop_season_id, status, planned_sowing_date, planned_transplant_date, _last_modified, _synced, is_deleted',
+      cropPlanStages: 'id, crop_plan_id, stage_type, status, planned_start_date, _last_modified, _synced, is_deleted',
+      cropPlanTasks: 'id, crop_plan_stage_id, status, planned_due_date, assigned_to_user_id, _last_modified, _synced, is_deleted',
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, crop_plan_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
+      supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
+      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+      seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
+      flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+      preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+      flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+      feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+      suppliers: 'id, name, is_deleted, _last_modified, _synced',
+      crops: 'id, name, variety, type, notes, is_deleted, _last_modified, _synced',
+      cultivationLogs: 'id, user_id, activity_date, activity_type, plot_affected, _last_modified, _synced, is_deleted', 
+      cultivationActivityPlantingLinks: 'id, cultivation_log_id, planting_log_id, _last_modified, _synced, is_deleted, &[cultivation_log_id+planting_log_id]',
+      cultivationActivityUsedInputs: 'id, cultivation_log_id, input_inventory_id, quantity_used, quantity_unit, _last_modified, _synced, is_deleted, &[cultivation_log_id+input_inventory_id]',
+      harvestLogs: 'id, planting_log_id, tree_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
+      customers: 'id, name, customer_type, is_deleted, _last_modified, _synced',
+      saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced',
+      invoices: 'id, sale_id, invoice_number, is_deleted, _last_modified, _synced',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, is_deleted, _last_modified, _synced',
+      reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
+      purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced'
+    }).upgrade(async tx => {
+      console.log("Upgrading HurvesthubDB to version 34: Adding user_id to cultivationLogs schema.");
+    });
+
+    console.log('[HurvesthubDB] Constructor: Finished defining all versions.');
+
+    // Add 'ready' event listener
+    this.on('ready', () => {
+      console.log(`[HurvesthubDB] Database is ready. Actual DB version (db.verno): ${this.verno}`);
+      if (this.verno > 0) {
+        try {
+          const tableNames = this.tables.map(t => t.name);
+          console.log('[HurvesthubDB] Tables available after open:', tableNames);
+          if (!tableNames.includes('inputInventory')) {
+            console.error('[HurvesthubDB] CRITICAL: inputInventory is NOT in the list of available tables after DB open!');
+          }
+          if (!tableNames.includes('plantingLogs')) {
+            console.error('[HurvesthubDB] CRITICAL: plantingLogs is NOT in the list of available tables after DB open!');
+          }
+          // Add more checks as needed
+        } catch (e) {
+          console.error('[HurvesthubDB] Error listing tables on ready:', e);
+        }
+      }
+      // Dexie's on('ready') expects a Promise if it's doing async work,
+      // but here we are just logging, so void is fine.
+      // If you were to do async operations, return a Promise.
+    });
+
+    // Initialize table properties
+    console.log('[HurvesthubDB] Constructor: Initializing table properties.');
+    this.crops = this.table('crops');
+    this.seedBatches = this.table('seedBatches');
+    this.inputInventory = this.table('inputInventory');
+    this.plantingLogs = this.table('plantingLogs');
+    this.cultivationLogs = this.table('cultivationLogs');
+    this.cultivationActivityPlantingLinks = this.table('cultivationActivityPlantingLinks');
+    this.cultivationActivityUsedInputs = this.table('cultivationActivityUsedInputs');
+    this.harvestLogs = this.table('harvestLogs');
+    this.customers = this.table('customers');
+    this.sales = this.table('sales');
+    this.saleItems = this.table('saleItems');
+    this.invoices = this.table('invoices');
+    this.syncMeta = this.table('syncMeta');
+    this.trees = this.table('trees');
+    this.reminders = this.table('reminders');
+    this.seedlingProductionLogs = this.table('seedlingProductionLogs');
+    this.suppliers = this.table('suppliers');
+    this.flocks = this.table('flocks');
+    this.flock_records = this.table('flock_records');
+    this.feed_logs = this.table('feed_logs');
+    this.preventive_measure_schedules = this.table('preventive_measure_schedules');
+    this.supplierInvoices = this.table('supplierInvoices');
+    this.supplierInvoiceItems = this.table('supplierInvoiceItems');
+    this.purchasedSeedlings = this.table('purchasedSeedlings');
+    this.plots = this.table('plots');
+    this.cropSeasons = this.table('cropSeasons');
+    this.cropPlans = this.table('cropPlans');
+    this.cropPlanStages = this.table('cropPlanStages');
+    this.cropPlanTasks = this.table('cropPlanTasks');
+    this.plannedStageResources = this.table('plannedStageResources');
 
     // Post-versioning sanity check for table instantiation
     try {
-      console.log("DB Constructor: Attempting to access table names post-versioning.");
-      console.log("DB Constructor: Accessing crops.name:", this.crops.name);
+      console.log("[HurvesthubDB] Constructor: Attempting to access table names post-property-initialization.");
+      console.log("[HurvesthubDB] Constructor: Accessing crops.name:", this.crops.name);
       if (this.preventive_measure_schedules) {
-         console.log("DB Constructor: Accessing preventive_measure_schedules.name:", this.preventive_measure_schedules.name);
+         console.log("[HurvesthubDB] Constructor: Accessing preventive_measure_schedules.name:", this.preventive_measure_schedules.name);
       } else {
-         console.error("DB Constructor: this.preventive_measure_schedules is undefined before accessing .name");
+         console.error("[HurvesthubDB] Constructor: this.preventive_measure_schedules is undefined before accessing .name");
       }
-      console.log("DB Constructor: Table names accessed successfully (or check attempted).");
+      console.log("[HurvesthubDB] Constructor: Table names accessed successfully post-property-initialization.");
     } catch (e) {
-      console.error("DB Constructor: Error accessing table names post-versioning. This indicates a table didn't instantiate correctly.", e);
+      console.error("[HurvesthubDB] Constructor: Error accessing table names post-property-initialization.", e);
     }
+    console.log('[HurvesthubDB] Constructor: Finished initializing table properties and sanity checks.');
   }
 
   async markForSync<T extends { id: string; _last_modified?: number; _synced?: number; is_deleted?: number; deleted_at?: string; }>(
@@ -1480,7 +1566,9 @@ export async function getSyncStatus(): Promise<Record<string, { unsynced: number
         'flocks', 'flock_records', 'feed_logs',
         'preventive_measure_schedules', 'purchasedSeedlings',
         'plots', 'cropSeasons', 'cropPlans', 'cropPlanStages', 'cropPlanTasks',
-        'plannedStageResources' // Added new table
+        'plannedStageResources',
+        'cultivationActivityPlantingLinks', 
+        'cultivationActivityUsedInputs'     
     ];
 
     for (const tableName of tableNames) {

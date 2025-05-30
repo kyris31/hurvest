@@ -14,6 +14,39 @@ export default function SupplierInvoicesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // State for filters
+  const [filterInvoiceNumber, setFilterInvoiceNumber] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+  const [filterSupplierId, setFilterSupplierId] = useState('');
+
+  // supplierMap is defined later at component scope, no need to redefine in useMemo here.
+  // const supplierMap = React.useMemo(() => new Map(suppliers.map(s => [s.id, s.name])), [suppliers]);
+
+  const filteredSupplierInvoices = React.useMemo(() => {
+    if (!supplierInvoices) return [];
+    let items = supplierInvoices;
+
+    if (filterInvoiceNumber) {
+      items = items.filter(inv => inv.invoice_number.toLowerCase().includes(filterInvoiceNumber.toLowerCase()));
+    }
+    if (filterSupplierId) {
+      items = items.filter(inv => inv.supplier_id === filterSupplierId);
+    }
+    if (filterStartDate) {
+      items = items.filter(inv => new Date(inv.invoice_date) >= new Date(filterStartDate));
+    }
+    if (filterEndDate) {
+      // Add 1 day to endDate to make the filter inclusive of the selected end date
+      const endDate = new Date(filterEndDate);
+      endDate.setDate(endDate.getDate() + 1);
+      items = items.filter(inv => new Date(inv.invoice_date) < endDate);
+    }
+    // Default sort by invoice_date descending (newest first)
+    return items.sort((a, b) => new Date(b.invoice_date).getTime() - new Date(a.invoice_date).getTime());
+  }, [supplierInvoices, filterInvoiceNumber, filterSupplierId, filterStartDate, filterEndDate]);
+
+
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     setError(null);
@@ -97,14 +130,68 @@ export default function SupplierInvoicesPage() {
         </div>
       </header>
 
+      {/* Filter UI Section */}
+      <div className="my-4 p-4 bg-gray-50 shadow rounded-lg">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+          <div>
+            <label htmlFor="filterInvoiceNumber" className="block text-sm font-medium text-gray-700">Invoice Number</label>
+            <input
+              type="text"
+              id="filterInvoiceNumber"
+              value={filterInvoiceNumber}
+              onChange={(e) => setFilterInvoiceNumber(e.target.value)}
+              placeholder="Search invoice #"
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            />
+          </div>
+          <div>
+            <label htmlFor="filterSupplierId" className="block text-sm font-medium text-gray-700">Supplier</label>
+            <select
+              id="filterSupplierId"
+              value={filterSupplierId}
+              onChange={(e) => setFilterSupplierId(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            >
+              <option value="">All Suppliers</option>
+              {suppliers.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="filterStartDate" className="block text-sm font-medium text-gray-700">From Date</label>
+            <input
+              type="date"
+              id="filterStartDate"
+              value={filterStartDate}
+              onChange={(e) => setFilterStartDate(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            />
+          </div>
+          <div>
+            <label htmlFor="filterEndDate" className="block text-sm font-medium text-gray-700">To Date</label>
+            <input
+              type="date"
+              id="filterEndDate"
+              value={filterEndDate}
+              onChange={(e) => setFilterEndDate(e.target.value)}
+              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+            />
+          </div>
+        </div>
+      </div>
+
       {isLoading && <p>Loading supplier invoices...</p>}
       {error && <p className="text-red-500">{error}</p>}
 
       {!isLoading && !error && (
         <>
-          {/* Placeholder for SupplierInvoiceList component */}
-          {supplierInvoices.length === 0 ? (
-            <p>No supplier invoices recorded yet.</p>
+          {filteredSupplierInvoices.length === 0 ? (
+            <p className="text-center text-gray-500 py-4">
+              {filterInvoiceNumber || filterSupplierId || filterStartDate || filterEndDate
+                ? "No supplier invoices match your current filters."
+                : "No supplier invoices recorded yet."}
+            </p>
           ) : (
             <div className="overflow-x-auto bg-white shadow sm:rounded-lg">
               <table className="min-w-full divide-y divide-gray-200">
@@ -119,12 +206,12 @@ export default function SupplierInvoicesPage() {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {supplierInvoices.map(invoice => (
+                  {filteredSupplierInvoices.map(invoice => ( // Use filtered list here
                     <tr key={invoice.id}>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(invoice.invoice_date).toLocaleDateString()}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{invoice.invoice_number}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{supplierMap.get(invoice.supplier_id) || 'N/A'}</td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">€{invoice.total_amount_net.toFixed(2)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">€{(invoice.total_amount_net || 0).toFixed(2)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{invoice.status}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-2">
                         <Link href={`/inventory/supplier-invoices/edit/${invoice.id}`} /* Changed 'view' to 'edit' */
