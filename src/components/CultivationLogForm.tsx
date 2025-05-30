@@ -24,9 +24,7 @@ interface CultivationLogFormData {
     quantity_unit: string;
     is_deleted?: boolean; // To signal deletion to parent
   }>;
-  // planting_log_ids will be handled by the parent based on selectedPlantingLogIds if needed,
-  // or by creating CultivationActivityPlantingLink entries.
-  // For now, this form will manage selectedPlantingLogIds and the parent will create the links.
+  selectedPlantingLogIds: string[]; // Add this to the form data structure
 }
 
 interface CultivationLogFormProps {
@@ -84,9 +82,11 @@ export default function CultivationLogForm({
         console.log('[CultivationLogForm] received availablePlantingLogsFromProps:', JSON.stringify(availablePlantingLogsFromProps.map(p => ({id: p.id, displayLabel: p.displayLabel}))));
 
         if (activityPlantingLinksFromProps) {
-            const currentLinks = activityPlantingLinksFromProps.filter(
-                link => link.cultivation_log_id === initialLogData.id && link.is_deleted !== 1
-            );
+            const currentLinks = activityPlantingLinksFromProps.filter(link => {
+                const match = link.cultivation_log_id === initialLogData.id && link.is_deleted !== 1;
+                console.log(`[CultivationLogForm DEBUG] Comparing link.cult_id (${link.cultivation_log_id}) vs initialLogData.id (${initialLogData.id}) - Match: ${match}`);
+                return match;
+            });
             console.log('[CultivationLogForm] Filtered currentLinks based on initialLogData.id:', JSON.stringify(currentLinks));
             const plantingLogIdsToSelect = currentLinks.map(link => link.planting_log_id);
             console.log('[CultivationLogForm] plantingLogIdsToSelect for checkboxes:', plantingLogIdsToSelect);
@@ -131,43 +131,56 @@ export default function CultivationLogForm({
 
   const handlePlantingLogSelectionChange = (plantingLogId: string) => {
     setSelectedPlantingLogIds(prevSelectedIds => {
-      if (prevSelectedIds.includes(plantingLogId)) {
-        return prevSelectedIds.filter(id => id !== plantingLogId); // Unselect
-      } else {
-        return [...prevSelectedIds, plantingLogId]; // Select
-      }
+      const newSelectedIds = prevSelectedIds.includes(plantingLogId)
+        ? prevSelectedIds.filter(id => id !== plantingLogId) // Unselect
+        : [...prevSelectedIds, plantingLogId]; // Select
+      console.log('[CultivationLogForm] handlePlantingLogSelectionChange - New selected IDs:', newSelectedIds);
+      return newSelectedIds;
     });
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    console.log('[CultivationLogForm] handleSubmit triggered.'); // Log: Start of handleSubmit
     e.preventDefault();
     setFormError(null);
+    console.log('[CultivationLogForm] Initial values: activityDate:', activityDate, 'activityType:', activityType, 'selectedPlantingLogIds:', selectedPlantingLogIds.length, 'plotAffected:', plotAffected);
 
     if (!activityDate || !activityType.trim()) {
-      setFormError('Activity Date and Activity Type are required.');
+      const errorMsg = 'Activity Date and Activity Type are required.';
+      console.log('[CultivationLogForm] Validation failed:', errorMsg);
+      setFormError(errorMsg);
       return;
     }
     if (selectedPlantingLogIds.length === 0 && !plotAffected.trim()) {
-      setFormError('Either select at least one Planting Log or specify the Plot Affected.');
+      const errorMsg = 'Either select at least one Planting Log or specify the Plot Affected.';
+      console.log('[CultivationLogForm] Validation failed:', errorMsg);
+      setFormError(errorMsg);
       return;
     }
     // New validation for usedInputs array
-    for (const usedIn of usedInputs) {
+    for (const [index, usedIn] of usedInputs.entries()) {
       if (!usedIn.input_inventory_id) {
-        setFormError('All added input items must have an item selected.');
+        const errorMsg = `Input item #${index + 1}: An item must be selected.`;
+        console.log('[CultivationLogForm] Validation failed:', errorMsg);
+        setFormError(errorMsg);
         return;
       }
       if (usedIn.quantity_used === '' || isNaN(Number(usedIn.quantity_used)) || Number(usedIn.quantity_used) <= 0) {
-        const itemName = availableInputsFromProps.find(i => i.id === usedIn.input_inventory_id)?.name || 'Selected input';
-        setFormError(`Quantity used for "${itemName}" must be a positive number.`);
+        const itemName = availableInputsFromProps.find(i => i.id === usedIn.input_inventory_id)?.name || `Item #${index + 1}`;
+        const errorMsg = `Quantity used for "${itemName}" must be a positive number.`;
+        console.log('[CultivationLogForm] Validation failed:', errorMsg);
+        setFormError(errorMsg);
         return;
       }
       if (!usedIn.quantity_unit.trim()) {
-        const itemName = availableInputsFromProps.find(i => i.id === usedIn.input_inventory_id)?.name || 'Selected input';
-        setFormError(`Unit for "${itemName}" is required.`);
+        const itemName = availableInputsFromProps.find(i => i.id === usedIn.input_inventory_id)?.name || `Item #${index + 1}`;
+        const errorMsg = `Unit for "${itemName}" is required.`;
+        console.log('[CultivationLogForm] Validation failed:', errorMsg);
+        setFormError(errorMsg);
         return;
       }
     }
+    console.log('[CultivationLogForm] All validations passed.');
 
     // Data for the main CultivationLog record
     const logCoreData: Omit<CultivationLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at' | 'is_deleted' | 'deleted_at'> = {
@@ -192,16 +205,21 @@ export default function CultivationLogForm({
           quantity_used: Number(ui.quantity_used),
           quantity_unit: ui.quantity_unit,
         })),
-      // The parent (page.tsx) will handle selectedPlantingLogIds to create/update CultivationActivityPlantingLink records
+      selectedPlantingLogIds: selectedPlantingLogIds, // Add selected IDs from form state
     };
     
+    console.log('[CultivationLogForm] Data being submitted:', JSON.stringify(formDataToSubmit, null, 2)); // Log: Data before calling onSubmit
+
     try {
+      console.log('[CultivationLogForm] Calling onSubmit prop...');
       await onSubmit(formDataToSubmit); // This now sends the structured data
+      console.log('[CultivationLogForm] onSubmit prop finished.');
       // onCancel(); // Parent will call onCancel after its own successful transaction
     } catch (err) {
-        console.error("Error saving cultivation log and links:", err);
+        console.error("[CultivationLogForm] Error during onSubmit call or in parent's handler:", err);
         setFormError(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
+        console.log('[CultivationLogForm] handleSubmit finished.');
     }
   };
 
@@ -268,7 +286,7 @@ export default function CultivationLogForm({
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50 flex justify-center items-center p-4">
-      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl">
+      <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
         <h2 className="text-2xl font-bold mb-6 text-gray-800">
           {initialLogData ? 'Edit Cultivation Log' : 'Record Cultivation Activity'}
         </h2>
@@ -279,7 +297,7 @@ export default function CultivationLogForm({
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Affected Planting Logs (select one or more, or leave blank if using "Plot Affected" only)
             </label>
-            <div className="max-h-60 overflow-y-auto border border-gray-300 rounded-md p-2 space-y-1"> {/* Increased max-h-40 to max-h-60 */}
+            <div className="max-h-72 overflow-y-auto border border-gray-300 rounded-md p-2 space-y-1"> {/* Reduced max-h-96 to max-h-72 */}
               {availablePlantingLogsFromProps.length === 0 && <p className="text-xs text-gray-500">No active planting logs available.</p>}
               {availablePlantingLogsFromProps.map(pl => {
                 const isChecked = selectedPlantingLogIds.includes(pl.id);
@@ -346,7 +364,11 @@ export default function CultivationLogForm({
               type="text"
               id="plotAffected"
               value={plotAffected}
-              onChange={(e) => setPlotAffected(e.target.value)}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                console.log('[CultivationLogForm] plotAffected onChange - New value:', newValue);
+                setPlotAffected(newValue);
+              }}
               className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
               disabled={isSubmitting}
               placeholder={"Enter plot details (e.g., specific rows, or general area)"}

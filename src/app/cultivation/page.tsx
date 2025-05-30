@@ -35,7 +35,7 @@ export default function CultivationLogsPage() {
       quantity_unit: string;
       is_deleted?: boolean;
     }>;
-    // selectedPlantingLogIds will be handled by this component based on what's submitted from the form
+    selectedPlantingLogIds: string[]; // Added to match the form's output
   }
 
   const fetchData = useCallback(async () => {
@@ -157,44 +157,27 @@ export default function CultivationLogsPage() {
   }, [fetchData, isDbReady, dbInstance]);
 
   const handleFormSubmit = async (formData: CultivationLogFormData) => {
+    console.log('[CultivationLogsPage] handleFormSubmit triggered. FormData:', JSON.stringify(formData, null, 2));
     setIsSubmitting(true);
     setError(null);
     const currentDb = dbInstance || db;
-    const { logData, usedInputs } = formData;
+    const { logData, usedInputs, selectedPlantingLogIds } = formData; // Destructure selectedPlantingLogIds
     const now = new Date().toISOString();
     const timestamp = Date.now();
     const cultivationLogId = ('id' in logData && logData.id) ? logData.id : crypto.randomUUID();
 
-    // Extract selectedPlantingLogIds from the form if it's passed back, or manage it via a separate state in page.tsx
-    // For this example, assuming CultivationLogForm passes back selectedPlantingLogIds if it manages them.
-    // Or, if CultivationLogForm only manages its internal state, we'd get them from selectedPlantingLogIds state of this page.
-    // Let's assume for now the form data might include it, or we use this page's state.
-    // For simplicity, we'll assume the form doesn't pass selectedPlantingLogIds back directly in formData,
-    // and we rely on the `selectedPlantingLogIds` state managed by the form, which isn't directly accessible here.
-    // This part needs careful handling of how selectedPlantingLogIds are communicated from form to this handler.
-    // A common pattern is for the form to call a specific handler for planting log selection changes.
-    // For now, we'll assume the form's `onSubmit` needs to be adapted to include these if not already.
-    // Let's assume `formData` will be extended or we use a separate mechanism for `selectedPlantingLogIds`.
-    // For this iteration, we'll assume `selectedPlantingLogIds` is available from the form's state via a prop or callback.
-    // This example will proceed as if `formData` contains `selectedPlantingLogIds`.
-    // This needs to be reconciled with CultivationLogForm's actual onSubmit data structure.
-    // The current CultivationLogForm's handleSubmit calls onSubmit with only logData and usedInputs.
-    // So, we need to get selectedPlantingLogIds from the form's state, which is not directly available here.
-    // This implies CultivationLogForm's onSubmit needs to pass these.
-    // Let's modify CultivationLogForm to pass selectedPlantingLogIds.
-    // For now, this function will assume it gets it.
-
-    // This is a placeholder - selectedPlantingLogIds needs to be correctly passed from the form
-    const finalSelectedPlantingLogIds = (formData as any).selectedPlantingLogIds || [];
-
+    const finalSelectedPlantingLogIds = selectedPlantingLogIds || [];
+    console.log('[CultivationLogsPage] finalSelectedPlantingLogIds after destructuring/defaulting:', JSON.stringify(finalSelectedPlantingLogIds));
 
     try {
+      console.log('[CultivationLogsPage] Starting DB transaction...');
       await currentDb.transaction('rw', 
         currentDb.cultivationLogs, 
         currentDb.inputInventory, 
         currentDb.cultivationActivityUsedInputs,
         currentDb.cultivationActivityPlantingLinks // Add to transaction
       , async () => {
+        console.log('[CultivationLogsPage] Inside DB transaction. Editing existing log?', ('id' in logData && logData.id));
         if ('id' in logData && logData.id) {
           const updatedLogData: Partial<CultivationLog> = { 
             ...logData, 
@@ -318,29 +301,34 @@ export default function CultivationLogsPage() {
             });
           }
         }
+        console.log('[CultivationLogsPage] DB transaction block finished.');
       });
+      console.log('[CultivationLogsPage] DB transaction committed.');
 
       try {
-        console.log("CultivationLogsPage: Push requesting after form submit...");
+        console.log("[CultivationLogsPage] Push requesting after form submit...");
         const pushResult = await requestPushChanges();
         if (pushResult.success) {
-          console.log("CultivationLogsPage: Push requested successfully after form submit.");
+          console.log("[CultivationLogsPage] Push requested successfully after form submit.");
         } else {
-          console.error("CultivationLogsPage: Push request failed after form submit.", pushResult.errors);
+          console.error("[CultivationLogsPage] Push request failed after form submit.", pushResult.errors);
         }
       } catch (syncError) {
-        console.error("Error requesting push after cultivation log save:", syncError);
+        console.error("[CultivationLogsPage] Error requesting push after cultivation log save:", syncError);
       }
 
+      console.log('[CultivationLogsPage] Calling fetchData after successful save.');
       await fetchData();
       setShowForm(false);
       setEditingLog(null);
       setEditingUsedInputs([]);
+      console.log('[CultivationLogsPage] Form closed and state reset.');
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to save cultivation log. Please try again.";
-      console.error("Failed to save cultivation log:", err);
+      console.error("[CultivationLogsPage] Error in handleFormSubmit:", err); // Log the actual error object
       setError(errorMessage);
     } finally {
+      console.log('[CultivationLogsPage] handleFormSubmit finally block. Setting isSubmitting to false.');
       setIsSubmitting(false);
     }
   };

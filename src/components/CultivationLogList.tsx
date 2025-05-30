@@ -3,6 +3,12 @@
 import React from 'react';
 import { CultivationLog, PlantingLog, InputInventory, SeedBatch, Crop, CultivationActivityUsedInput, CultivationActivityPlantingLink } from '@/lib/db';
 
+// Interface for enriched PlantingLog object
+interface EnrichedPlantingLog extends PlantingLog {
+  cropName?: string;
+  displayLabel?: string;
+}
+
 interface CultivationLogListProps {
   cultivationLogs: CultivationLog[];
   plantingLogs: PlantingLog[];
@@ -30,27 +36,59 @@ export default function CultivationLogList({
 }: CultivationLogListProps) {
 
   const getPlantingLogInfo = (cultivationLogId: string) => {
+    console.log(`[CultivationLogList] getPlantingLogInfo called for cultLogId: ${cultivationLogId}`);
     const activePlantingLinks = activityPlantingLinks.filter(apl => apl.is_deleted !== 1);
     const link = activePlantingLinks.find(apl => apl.cultivation_log_id === cultivationLogId);
-    if (!link || !link.planting_log_id) return 'N/A';
+
+    if (!link || !link.planting_log_id) {
+      console.log(`[CultivationLogList] No active link found for cultLogId: ${cultivationLogId}`);
+      return 'N/A';
+    }
     const plantingLogId = link.planting_log_id;
+    console.log(`[CultivationLogList] Found link. PlantingLog ID: ${plantingLogId}`);
+
     const activePlantingLogs = plantingLogs.filter(pl => pl.is_deleted !== 1);
     const activeSeedBatches = seedBatches.filter(sb => sb.is_deleted !== 1);
     const activeCrops = crops.filter(c => c.is_deleted !== 1);
 
-    const pLog = activePlantingLogs.find(pl => pl.id === plantingLogId);
-    if (!pLog) return 'Unknown/Deleted Planting Log';
+    const pLogFromState = activePlantingLogs.find(pl => pl.id === plantingLogId);
+    if (!pLogFromState) {
+      console.log(`[CultivationLogList] PlantingLog not found for ID: ${plantingLogId}`);
+      return 'Unknown/Deleted Planting Log';
+    }
+    const pLog = pLogFromState as EnrichedPlantingLog; // Cast to allow access to enriched properties
+    console.log(`[CultivationLogList] Found PlantingLog (casted):`, JSON.stringify(pLog, null, 2));
+
     let cropName = 'N/A';
-    if (pLog.seed_batch_id) {
+    // Use pre-enriched cropName if available on the pLog object
+    if (pLog.cropName) {
+      cropName = pLog.cropName;
+      console.log(`[CultivationLogList] Using pre-enriched cropName: ${cropName}`);
+    } else if (pLog.seed_batch_id) {
+      console.log(`[CultivationLogList] PlantingLog has seed_batch_id: ${pLog.seed_batch_id}, attempting lookup.`);
       const sBatch = activeSeedBatches.find(sb => sb.id === pLog.seed_batch_id);
       if (sBatch) {
+        console.log(`[CultivationLogList] Found SeedBatch:`, JSON.stringify(sBatch, null, 2));
         const crop = activeCrops.find(c => c.id === sBatch.crop_id);
-        if (crop) cropName = crop.name;
+        if (crop) {
+          cropName = crop.name;
+          console.log(`[CultivationLogList] Found Crop via SeedBatch: ${cropName}`);
+        } else {
+          console.log(`[CultivationLogList] Crop not found for crop_id: ${sBatch.crop_id}`);
+          cropName = 'Unknown/Deleted Crop';
+        }
       } else {
+        console.log(`[CultivationLogList] SeedBatch not found for ID: ${pLog.seed_batch_id}`);
         cropName = 'Unknown/Deleted Crop (from Batch)';
       }
+    } else {
+      console.log(`[CultivationLogList] PlantingLog has no pre-enriched cropName and no seed_batch_id.`);
     }
-    return `${new Date(pLog.planting_date).toLocaleDateString()} - ${cropName} (${pLog.location_description || 'N/A'})`;
+    const locationDesc = pLog.location_description || 'N/A';
+    console.log(`[CultivationLogList] Location Description: ${locationDesc}`);
+    const resultString = `${new Date(pLog.planting_date).toLocaleDateString()} - ${cropName} (${locationDesc})`;
+    console.log(`[CultivationLogList] Resulting string: ${resultString}`);
+    return resultString;
   };
 
   const getInputInfo = (cultivationLogId: string) => {
