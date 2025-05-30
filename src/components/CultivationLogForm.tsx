@@ -279,7 +279,7 @@ export default function CultivationLogForm({
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Affected Planting Logs (select one or more, or leave blank if using "Plot Affected" only)
             </label>
-            <div className="max-h-24 overflow-y-auto border border-gray-300 rounded-md p-2 space-y-1"> {/* Further reduced max-h-32 to max-h-24 */}
+            <div className="max-h-60 overflow-y-auto border border-gray-300 rounded-md p-2 space-y-1"> {/* Increased max-h-40 to max-h-60 */}
               {availablePlantingLogsFromProps.length === 0 && <p className="text-xs text-gray-500">No active planting logs available.</p>}
               {availablePlantingLogsFromProps.map(pl => {
                 const isChecked = selectedPlantingLogIds.includes(pl.id);
