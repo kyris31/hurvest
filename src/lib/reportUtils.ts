@@ -415,21 +415,43 @@ async function getAllDetailedSalesForReport(filters?: DateRangeFilters): Promise
         salesQuery = salesQuery.and(s => s.sale_date <= end);
     }
 
-    const sales = await salesQuery.toArray();
+    const salesData = await salesQuery.toArray();
+    // Sort sales by date ascending
+    const sales = salesData.sort((a, b) => new Date(a.sale_date).getTime() - new Date(b.sale_date).getTime());
     const saleIds = sales.map(s => s.id);
 
     // Fetch related data only for the filtered sales
-    const [saleItems, customers, harvestLogs, plantingLogs, seedBatches, crops, invoices] = await Promise.all([
+    const [
+        saleItems, customers, harvestLogs, plantingLogs, seedBatches, crops, invoices,
+        inputInventory, purchasedSeedlings, trees, seedlingProductionLogs // Added new tables
+    ] = await Promise.all([
         db.saleItems.where('sale_id').anyOf(saleIds).and(si => si.is_deleted !== 1).toArray(),
         db.customers.filter(c => c.is_deleted !== 1).toArray(),
         db.harvestLogs.filter(h => h.is_deleted !== 1).toArray(),
         db.plantingLogs.filter(p => p.is_deleted !== 1).toArray(),
         db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
         db.crops.filter(c => c.is_deleted !== 1).toArray(),
-        db.invoices.where('sale_id').anyOf(saleIds).and(i => i.is_deleted !== 1).toArray()
+        db.invoices.where('sale_id').anyOf(saleIds).and(i => i.is_deleted !== 1).toArray(),
+        db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray(), // Added
+        db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1).toArray(), // Added
+        db.trees.filter(t => t.is_deleted !== 1).toArray(), // Added
+        db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray() // Added
     ]);
 
     const reportItems: SaleReportItem[] = [];
+
+    // Create maps for efficient lookup
+    const customerMap = new Map(customers.map(c => [c.id, c]));
+    const harvestLogMap = new Map(harvestLogs.map(h => [h.id, h]));
+    const plantingLogMap = new Map(plantingLogs.map(pl => [pl.id, pl]));
+    const seedBatchMap = new Map(seedBatches.map(sb => [sb.id, sb]));
+    const cropMap = new Map(crops.map(c => [c.id, c]));
+    const invoiceMap = new Map(invoices.map(i => [i.sale_id, i])); // Keyed by sale_id for easier lookup per sale
+    const inputInventoryMap = new Map(inputInventory.map(ii => [ii.id, ii]));
+    const purchasedSeedlingMap = new Map(purchasedSeedlings.map(ps => [ps.id, ps]));
+    const treeMap = new Map(trees.map(t => [t.id, t]));
+    const seedlingProductionLogMap = new Map(seedlingProductionLogs.map(sl => [sl.id, sl]));
+
 
     for (const sale of sales) {
         const customer = customers.find(c => c.id === sale.customer_id);
@@ -453,27 +475,83 @@ async function getAllDetailedSalesForReport(filters?: DateRangeFilters): Promise
             });
         } else {
             for (const item of itemsForThisSale) {
-                let productName = 'Product (Info Missing)'; // Default if no link found
+                let productName = 'Unknown Product'; // Default
                 let productDetails = '';
+
                 if (item.harvest_log_id) {
-                    const harvestLog = harvestLogs.find(h => h.id === item.harvest_log_id);
+                    const harvestLog = harvestLogMap.get(item.harvest_log_id);
                     if (harvestLog) {
-                        const plantingLog = plantingLogs.find(pl => pl.id === harvestLog.planting_log_id);
-                        if (plantingLog && plantingLog.seed_batch_id) {
-                            const seedBatch = seedBatches.find(sb => sb.id === plantingLog.seed_batch_id);
-                            if (seedBatch) {
-                                const crop = crops.find(c => c.id === seedBatch.crop_id);
-                                productName = crop?.name || 'Crop (Name Missing)';
-                                productDetails = `Batch: ${seedBatch.batch_code}, Harvest: ${new Date(harvestLog.harvest_date).toLocaleDateString()}`;
-                            } else {
-                                productName = 'Product (Seed Batch Missing)';
+                        productDetails = `(Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
+                        let crop: Crop | undefined;
+                        let potentialProductNameFromInv: string | undefined;
+                        let potentialProductNameFromPS: string | undefined;
+
+                        if (harvestLog.tree_id) {
+                            const tree = treeMap.get(harvestLog.tree_id);
+                            if (tree) {
+                                let treeNameParts = [];
+                                if (tree.identifier && tree.identifier.trim() !== '') treeNameParts.push(tree.identifier);
+                                if (tree.species && tree.species.trim() !== '') treeNameParts.push(tree.species);
+                                if (tree.variety && tree.variety.trim() !== '') treeNameParts.push(`(${tree.variety})`);
+                                productName = treeNameParts.length > 0 ? treeNameParts.join(' ') : 'Unnamed Tree Product';
                             }
-                        } else {
-                            productName = 'Product (Planting/Seed Link Missing)';
+                        } else if (harvestLog.planting_log_id) {
+                            const plantingLog = plantingLogMap.get(harvestLog.planting_log_id);
+                            if (plantingLog) {
+                                if (plantingLog.input_inventory_id) {
+                                    const invItem = inputInventoryMap.get(plantingLog.input_inventory_id);
+                                    if (invItem) {
+                                        if (invItem.crop_id) crop = cropMap.get(invItem.crop_id);
+                                        if (invItem.name && invItem.name.trim() !== '') potentialProductNameFromInv = invItem.name;
+                                    }
+                                }
+                                if (!crop && plantingLog.purchased_seedling_id) {
+                                    const psItem = purchasedSeedlingMap.get(plantingLog.purchased_seedling_id);
+                                    if (psItem) {
+                                        if (psItem.crop_id) crop = cropMap.get(psItem.crop_id);
+                                        if (psItem.name && psItem.name.trim() !== '') potentialProductNameFromPS = psItem.name;
+                                    }
+                                }
+                                if (!crop && plantingLog.seedling_production_log_id) {
+                                    const seedlingLog = seedlingProductionLogMap.get(plantingLog.seedling_production_log_id);
+                                    if (seedlingLog) {
+                                        if (seedlingLog.crop_id) crop = cropMap.get(seedlingLog.crop_id);
+                                        if (!crop && seedlingLog.seed_batch_id) {
+                                            const seedBatch = seedBatchMap.get(seedlingLog.seed_batch_id);
+                                            if (seedBatch && seedBatch.crop_id) crop = cropMap.get(seedBatch.crop_id);
+                                        }
+                                    }
+                                }
+                                if (!crop && plantingLog.seed_batch_id) {
+                                    const seedBatch = seedBatchMap.get(plantingLog.seed_batch_id);
+                                    if (seedBatch && seedBatch.crop_id) crop = cropMap.get(seedBatch.crop_id);
+                                }
+
+                                if (crop) {
+                                    productName = (crop.name && crop.name.trim() !== '') ? crop.name : 'Unnamed Crop';
+                                } else if (potentialProductNameFromPS) {
+                                    productName = potentialProductNameFromPS;
+                                } else if (potentialProductNameFromInv) {
+                                    productName = potentialProductNameFromInv;
+                                }
+                            }
+                        }
+                        if (productName === 'Unknown Product' && harvestLog) { // If still unknown after all checks for a harvest log
+                            productName = 'General Harvested Item';
                         }
                     } else {
-                        productName = 'Product (Harvest Log Missing)';
+                         productName = 'Product (Harvest Log Missing)';
                     }
+                } else if (item.input_inventory_id) {
+                    const inventoryItem = inputInventoryMap.get(item.input_inventory_id);
+                    if (inventoryItem) {
+                        productName = (inventoryItem.name && inventoryItem.name.trim() !== '') ? inventoryItem.name : 'Unnamed Inventory Item';
+                        productDetails = `(Stock ID: ${inventoryItem.id.substring(0,8)}...)`;
+                    } else {
+                        productName = 'Product (Inventory Link Missing)';
+                    }
+                } else {
+                    productName = 'Product (Source Link Missing)'; // General fallback if neither harvest nor inventory ID
                 }
 
                 const itemSubtotal = item.quantity_sold * item.price_per_unit;
@@ -3117,6 +3195,8 @@ async function getAllPlantingLogsForReport(filters?: DateRangeFilters): Promise<
   }
   return reportItems;
 }
+// Removing the duplicated exportPlantingLogsToPDF function.
+// The original one should exist elsewhere or will be restored.
 
 function convertPlantingLogsToCSV(data: PlantingLogReportItem[]): string {
   if (data.length === 0) return 'No planting log data available for the selected period.';
@@ -3158,121 +3238,415 @@ export async function exportPlantingLogsToCSV(filters?: DateRangeFilters): Promi
 }
 
 export async function exportPlantingLogsToPDF(filters?: DateRangeFilters): Promise<void> {
-  try {
-    const reportData = await getAllPlantingLogsForReport(filters);
-    if (reportData.length === 0) {
-      alert("No planting log data available for the selected period to generate PDF.");
+    try {
+        const reportData = await getAllPlantingLogsForReport(filters);
+
+        if (reportData.length === 0) {
+            alert("No planting data found for the selected filters.");
+            return;
+        }
+
+        const pdfDoc = await PDFDocument.create();
+        pdfDoc.registerFontkit(fontkit);
+        let page = pdfDoc.addPage([612, 792]); // Standard US Letter
+
+        let mainFont: PDFFont;
+        let boldFont: PDFFont;
+        try {
+            const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+            const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+            mainFont = await pdfDoc.embedFont(fontBytes);
+            boldFont = await pdfDoc.embedFont(boldFontBytes);
+        } catch (e) {
+            console.error("Error embedding NotoSans font for Planting Logs PDF, falling back to Helvetica.", e);
+            mainFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+            boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        }
+
+        const { width, height } = page.getSize();
+        const marginProperty = 40; // Renamed to avoid conflict
+        const yPos = { y: height - marginProperty };
+
+        await addPdfHeader(pdfDoc, page, yPos, mainFont, boldFont);
+        
+        page.drawText('Planting Logs Report', {
+            x: marginProperty,
+            y: yPos.y,
+            font: boldFont,
+            size: 18,
+            color: rgb(0.1, 0.1, 0.1)
+        });
+        yPos.y -= (18 * 1.2 + 15);
+
+        if (filters?.startDate || filters?.endDate) {
+            let dateRangeText = 'Date Range: ';
+            if (filters.startDate) dateRangeText += `${new Date(filters.startDate).toLocaleDateString()}`;
+            dateRangeText += (filters.startDate && filters.endDate) ? ' - ' : '';
+            if (filters.endDate) dateRangeText += `${new Date(filters.endDate).toLocaleDateString()}`;
+            page.drawText(dateRangeText, { x: marginProperty, y: yPos.y, font: mainFont, size: 10, color: rgb(0.3, 0.3, 0.3) });
+            yPos.y -= 20;
+        }
+
+        const tableHeaders = ["Date", "Crop", "Variety", "Source", "Location", "Qty", "Unit", "Exp. Harvest", "Status"];
+        const columnWidths = [60, 100, 80, 70, 100, 40, 40, 70, 60];
+        
+        const tableData = reportData.map(item => [
+            item.plantingDate,
+            item.cropName,
+            item.cropVariety,
+            item.sourceType,
+            item.location,
+            item.quantityPlanted.toString(),
+            item.quantityUnit,
+            item.expectedHarvestDate,
+            item.status
+        ]);
+
+        await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, {
+            font: mainFont,
+            boldFont: boldFont,
+            fontSize: 8,
+            headerFontSize: 9,
+            lineHeight: 12,
+            margin: marginProperty, // Use renamed variable
+            pageBottomMargin: marginProperty + 20
+        });
+        
+        const pdfBytes = await pdfDoc.save();
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const fileName = `Hurvesthub_Planting_Logs_Report_${new Date().toISOString().split('T')[0]}.pdf`;
+
+        if (typeof window.showSaveFilePicker === 'function') {
+            try {
+                const handle = await window.showSaveFilePicker({ suggestedName: fileName, types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }] });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error("Error saving Planting Logs PDF with File System Access API:", err);
+                    saveAs(blob, fileName); // Fallback
+                }
+            }
+        } else {
+            saveAs(blob, fileName);
+        }
+    } catch (error) {
+        console.error("Error exporting Planting Logs to PDF:", error);
+        alert("Failed to export Planting Logs to PDF. See console for details.");
+    }
+}
+// Ensuring everything after the correct exportPlantingLogsToPDF is cleared before Statement of Account insertion.
+// --- Statement of Account ---
+
+export interface StatementTransaction {
+  date: string;
+  type: 'invoice' | 'payment' | 'refund' | 'adjustment';
+  description: string;
+  notes?: string; // Added for invoice notes
+  debit: number;
+  credit: number;
+  balance: number;
+}
+
+export interface StatementOfAccountReportData {
+  customer: Customer;
+  startDate?: string | null;
+  endDate?: string | null;
+  openingBalance: number;
+  transactions: StatementTransaction[];
+  closingBalance: number;
+}
+
+export interface StatementOfAccountFilters extends DateRangeFilters {
+  customerId: string;
+}
+
+async function getStatementOfAccountData(
+  filters: StatementOfAccountFilters
+): Promise<StatementOfAccountReportData | null> {
+  const customer = await db.customers.get(filters.customerId);
+  if (!customer) {
+    console.error(`Customer with ID ${filters.customerId} not found.`);
+    return null;
+  }
+
+  let salesQuery = db.sales
+    .where('customer_id').equals(filters.customerId)
+    .and(s => s.is_deleted !== 1);
+
+  if (filters.startDate) {
+    salesQuery = salesQuery.and(s => s.sale_date >= filters.startDate!);
+  }
+  if (filters.endDate) {
+    salesQuery = salesQuery.and(s => s.sale_date <= filters.endDate!);
+  }
+
+  const salesForCustomer = await salesQuery.sortBy('sale_date');
+  const invoicesForCustomer = await db.invoices
+    .where('sale_id').anyOf(salesForCustomer.map(s => s.id))
+    .and(inv => inv.is_deleted !== 1)
+    .toArray();
+  const invoiceMap = new Map(invoicesForCustomer.map(inv => [inv.sale_id, inv]));
+
+  const transactions: StatementTransaction[] = [];
+  let runningBalance = 0;
+
+  for (const sale of salesForCustomer) {
+    const invoice = invoiceMap.get(sale.id);
+    const invoiceNumber = invoice?.invoice_number || `Sale ${sale.id.substring(0, 8)}`;
+    const invoiceAmount = sale.total_amount || 0;
+
+    transactions.push({
+      date: sale.sale_date,
+      type: 'invoice',
+      description: `Invoice ${invoiceNumber}`,
+      notes: sale.notes || undefined, // Add sale.notes here
+      debit: invoiceAmount,
+      credit: 0,
+      balance: 0,
+    });
+
+    let initialPaymentCoveredByHistory = false;
+    if (sale.payment_history && sale.payment_history.length > 0) {
+        const firstPayment = sale.payment_history[0];
+        if (firstPayment.date === sale.sale_date && 
+            firstPayment.amount === sale.amount_paid &&
+            firstPayment.method === sale.payment_method) {
+            initialPaymentCoveredByHistory = true;
+        }
+    }
+
+    if (sale.amount_paid && sale.amount_paid > 0 && !initialPaymentCoveredByHistory) {
+        transactions.push({
+            date: sale.sale_date,
+            type: 'payment',
+            description: `Initial Payment for ${invoiceNumber}`,
+            debit: 0,
+            credit: sale.amount_paid,
+            balance: 0,
+        });
+    }
+
+    if (sale.payment_history) {
+      for (const payment of sale.payment_history) {
+        if (initialPaymentCoveredByHistory && 
+            payment.date === sale.sale_date && 
+            payment.amount === sale.amount_paid &&
+            payment.method === sale.payment_method &&
+            sale.payment_history.indexOf(payment) === 0) {
+            continue; 
+        }
+        transactions.push({
+          date: payment.date,
+          type: 'payment',
+          description: `Payment (Method: ${payment.method || 'N/A'}${payment.notes ? ` - ${payment.notes}` : ''})`,
+          debit: 0,
+          credit: payment.amount,
+          balance: 0,
+        });
+      }
+    }
+  }
+
+  transactions.sort((a, b) => {
+    const dateComparison = new Date(a.date).getTime() - new Date(b.date).getTime();
+    if (dateComparison !== 0) return dateComparison;
+    if (a.type === 'invoice' && b.type !== 'invoice') return -1;
+    if (a.type !== 'invoice' && b.type === 'invoice') return 1;
+    return 0;
+  });
+
+  transactions.forEach(tx => {
+    runningBalance += tx.debit;
+    runningBalance -= tx.credit;
+    tx.balance = runningBalance;
+  });
+
+  return {
+    customer,
+    startDate: filters.startDate,
+    endDate: filters.endDate,
+    openingBalance: 0, 
+    transactions,
+    closingBalance: runningBalance,
+  };
+}
+
+export async function exportStatementOfAccountToPDF(filters: StatementOfAccountFilters): Promise<void> {
+  try { // Main try block for the PDF export function
+    const reportData = await getStatementOfAccountData(filters);
+
+    if (!reportData) {
+      alert("Could not generate statement data. Customer not found or other error.");
       return;
     }
 
     const pdfDoc = await PDFDocument.create();
-    await pdfDoc.registerFontkit(fontkit);
-    
-    // Revert to NotoSans and embed like in exportSalesToPDF (no explicit subset option)
-    const fontBytes = await fetch("/fonts/static/NotoSans-Regular.ttf").then(res => res.arrayBuffer());
-    const boldFontBytes = await fetch("/fonts/static/NotoSans-Bold.ttf").then(res => res.arrayBuffer());
-    const mainFont = await pdfDoc.embedFont(fontBytes); // Removed options object
-    const boldFont = await pdfDoc.embedFont(boldFontBytes); // Removed options object
+    pdfDoc.registerFontkit(fontkit);
+    let page = pdfDoc.addPage([612, 792]); 
 
-    let page = pdfDoc.addPage();
-    const { width, height } = page.getSize();
-    const margin = 50;
-    const usableWidth = width - 2 * margin;
-    let yPos = { y: height - margin };
-
-    await addPdfHeader(pdfDoc, page, yPos, mainFont, boldFont);
-
-    page.drawText('Planting Logs Report', {
-      x: margin,
-      y: yPos.y,
-      font: boldFont,
-      size: 18,
-      color: rgb(0.1, 0.1, 0.1),
-    });
-    yPos.y -= (18 * 1.2 + 15); // Adjust yPos after title, consistent with Sales Report
-
-    if (filters?.startDate || filters?.endDate) {
-        let dateRangeText = 'Date Range: ';
-        if (filters.startDate) dateRangeText += `${new Date(filters.startDate).toLocaleDateString()}`;
-        dateRangeText += (filters.startDate && filters.endDate) ? ' - ' : '';
-        if (filters.endDate) dateRangeText += `${new Date(filters.endDate).toLocaleDateString()}`;
-        page.drawText(dateRangeText, { x: margin, y: yPos.y, font: mainFont, size: 10, color: rgb(0.3, 0.3, 0.3) });
-        yPos.y -= 20;
+    let mainFont: PDFFont;
+    let boldFont: PDFFont;
+    try {
+      const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
+      const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+      mainFont = await pdfDoc.embedFont(fontBytes);
+      boldFont = await pdfDoc.embedFont(boldFontBytes);
+    } catch (e) {
+      console.error("Error embedding NotoSans font for Statement, falling back to Helvetica.", e);
+      mainFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     }
 
+    const { width, height } = page.getSize();
+    const margin = 40;
+    let y = height - margin; 
+    const yPos = { y: height - margin }; 
 
-    const tableHeaders = ["Date", "Crop", "Variety", "Source", "Location", "Qty", "Unit", "Exp. Harvest", "Status"]; // "Details" removed
-    // Adjusted column widths for 9 columns, aiming for sum ~515
-    const columnWidths = [
-        55, // Date
-        65, // Crop
-        65, // Variety
-        65, // Source
-        // 70, // Details (Removed)
-        60, // Location
-        30, // Qty
-        50, // Unit
-        60, // Exp. Harvest
-        35  // Status
-    ]; // Sum = 515
+    await addPdfHeader(pdfDoc, page, yPos, mainFont, boldFont);
+    y = yPos.y; 
 
-    const tableData = reportData.map(item => [
-      item.plantingDate,
-      item.cropName,
-      item.cropVariety,
-      item.sourceType,
-      // item.sourceDetails, // Removed
-      item.location,
-      item.quantityPlanted.toString(),
-      item.quantityUnit,
-      item.expectedHarvestDate,
-      item.status,
-      // item.notes // Notes might make rows too tall, consider adding them differently or truncating
-    ]);
+    page.drawText('Statement of Account', {
+      x: margin,
+      y: y - 14, 
+      font: boldFont,
+      size: 18,
+    });
+    y -= (14 * 2);
 
-    await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, {
-      font: mainFont,
-      boldFont: boldFont,
-      fontSize: 8,
-      headerFontSize: 9,
-      lineHeight: 14, // Explicitly set line height
-      margin: margin,
+    page.drawText(`Customer: ${reportData.customer.name}`, { x: margin, y, font: boldFont, size: 12 });
+    y -= 14;
+    if (reportData.customer.contact_info) {
+      page.drawText(`Contact: ${reportData.customer.contact_info}`, { x: margin, y, font: mainFont, size: 10 });
+      y -= 12;
+    }
+    if (reportData.customer.address) {
+      reportData.customer.address.split('\\n').forEach(line => {
+          page.drawText(line, { x: margin, y, font: mainFont, size: 10 });
+          y -= 12;
+      });
+    }
+    y -= 14;
+
+    const dateRangeText = `Statement Period: ${reportData.startDate ? new Date(reportData.startDate).toLocaleDateString() : 'Beginning of records'} - ${reportData.endDate ? new Date(reportData.endDate).toLocaleDateString() : 'End of records'}`;
+    page.drawText(dateRangeText, { x: margin, y, font: mainFont, size: 10 });
+    y -= (14 * 1.5);
+    
+    page.drawText(`Opening Balance: €${reportData.openingBalance.toFixed(2)}`, { x: width - margin - 150, y, font: boldFont, size: 10 });
+    y -= (14 * 1.5);
+
+    const tableTopY = y;
+    const colWidths = [70, 150, 100, 60, 60, 70]; // Date, Description, Notes, Debit, Credit, Balance - Adjusted widths
+    const headers = ['Date', 'Description', 'Notes', 'Debit (€)', 'Credit (€)', 'Balance (€)'];
+    let currentX = margin;
+    headers.forEach((header, i) => {
+      const headerWidth = boldFont.widthOfTextAtSize(header, 9);
+      let headerX;
+      // Indices: 0:Date, 1:Description, 2:Notes, 3:Debit, 4:Credit, 5:Balance
+      if (i === 0 || i === 1) { // Left-align Date, Description
+        headerX = currentX + 2;
+      } else if (i === 2) { // Center Notes
+        headerX = currentX + (colWidths[i] - headerWidth) / 2;
+      } else { // Right-align Debit, Credit, Balance headers
+        headerX = currentX + colWidths[i] - headerWidth - 2;
+      }
+      page.drawText(header, { x: headerX, y: tableTopY, font: boldFont, size: 9 });
+      currentX += colWidths[i];
+    });
+    y -= (14 * 1.5);
+
+    for (const tx of reportData.transactions) {
+      if (y < margin + 40) { 
+          page = pdfDoc.addPage([612, 792]);
+          yPos.y = height - margin; 
+          await addPdfHeader(pdfDoc, page, yPos, mainFont, boldFont);
+          y = yPos.y; 
+          currentX = margin;
+          headers.forEach((header, i) => {
+            const headerWidth = boldFont.widthOfTextAtSize(header, 9);
+            let headerX;
+            // Indices: 0:Date, 1:Description, 2:Notes, 3:Debit, 4:Credit, 5:Balance
+            if (i === 0 || i === 1) { // Left-align Date, Description
+              headerX = currentX + 2;
+            } else if (i === 2) { // Center Notes
+              headerX = currentX + (colWidths[i] - headerWidth) / 2;
+            } else { // Right-align Debit, Credit, Balance headers
+              headerX = currentX + colWidths[i] - headerWidth - 2;
+            }
+            page.drawText(header, { x: headerX, y: y, font: boldFont, size: 9 });
+            currentX += colWidths[i];
+          });
+          y -= (14 * 1.5);
+      }
+
+      currentX = margin;
+      // Truncate notes if they are too long for the column
+      const maxNoteLength = 25; // Adjust as needed
+      let displayNote = tx.notes || '';
+      if (displayNote.length > maxNoteLength) {
+        displayNote = displayNote.substring(0, maxNoteLength - 3) + '...';
+      }
+
+      const rowData = [
+        new Date(tx.date).toLocaleDateString(),
+        tx.description,
+        displayNote, // Added notes
+        tx.debit > 0 ? tx.debit.toFixed(2) : '-',
+        tx.credit > 0 ? tx.credit.toFixed(2) : '-',
+        tx.balance.toFixed(2),
+      ];
+      
+      rowData.forEach((cell, i) => {
+          const textWidth = mainFont.widthOfTextAtSize(cell, 8);
+          let cellX;
+          // Indices: 0:Date, 1:Description, 2:Notes, 3:Debit, 4:Credit, 5:Balance
+          if (i === 0 || i === 1) { // Left-align Date, Description
+            cellX = currentX + 2;
+          } else if (i === 2) { // Center Notes data
+            cellX = currentX + (colWidths[i] - textWidth) / 2;
+          } else { // Right-align Debit, Credit, Balance data
+            cellX = currentX + colWidths[i] - textWidth - 2;
+          }
+          page.drawText(cell, { x: cellX, y, font: mainFont, size: 8 });
+          currentX += colWidths[i];
+      });
+      y -= 14;
+    }
+    
+    y -= 12; 
+    page.drawLine({start: {x: margin, y:y}, end: {x: width - margin, y:y}, thickness:0.5, color: rgb(0.7,0.7,0.7)});
+    y -= 14;
+    const closingBalanceText = `Closing Balance: €${reportData.closingBalance.toFixed(2)}`;
+    page.drawText(closingBalanceText, { 
+      x: width - margin - boldFont.widthOfTextAtSize(closingBalanceText, 12), 
+      y, 
+      font: boldFont, 
+      size: 12 
     });
 
     const pdfBytes = await pdfDoc.save();
     const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-    const now = new Date();
-    const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    const suggestedName = `reports/Hurvesthub_Planting_Logs_Report_${dateStamp}.pdf`;
-    
-    if (typeof window.showSaveFilePicker === 'function') {
-        try {
-            const handle = await window.showSaveFilePicker({
-                suggestedName: suggestedName,
-                types: [{
-                    description: 'PDF Files',
-                    accept: { 'application/pdf': ['.pdf'] },
-                }],
-            });
-            const writable = await handle.createWritable();
-            await writable.write(blob);
-            await writable.close();
-        } catch (err: any) {
-            if (err.name !== 'AbortError') {
-                console.error("Error using showSaveFilePicker for Planting Logs PDF:", err);
-                alert(`Error saving file: ${err.message}. Falling back to direct download.`);
-                saveAs(blob, suggestedName);
-            } else {
-                console.log("Planting Logs PDF save cancelled by user.");
-            }
-        }
-    } else {
-        console.warn("showSaveFilePicker not supported for Planting Logs PDF. Using default saveAs.");
-        saveAs(blob, suggestedName);
-    }
+    const customerNameSafe = reportData.customer.name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const fileName = `Statement_${customerNameSafe}_${new Date().toISOString().split('T')[0]}.pdf`;
 
-  } catch (error) {
-    console.error("Error exporting planting logs to PDF:", error);
-    alert("Failed to export planting logs to PDF. See console for details.");
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        const handle = await window.showSaveFilePicker({ suggestedName: fileName, types: [{ description: 'PDF Files', accept: { 'application/pdf': ['.pdf'] } }] });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error("Error saving Statement PDF with File System Access API:", err);
+          saveAs(blob, fileName); 
+        }
+      }
+    } else {
+      saveAs(blob, fileName);
+    }
+  } catch (error) { // Catch for the main try block
+    console.error("Error exporting Statement of Account to PDF:", error);
+    alert("Failed to export Statement of Account. See console for details.");
   }
 }

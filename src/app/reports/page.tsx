@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/db';
-import type { Flock } from '@/lib/db'; // Import Flock type
+import type { Flock, Customer } from '@/lib/db'; // Import Flock and Customer types
 import {
     exportSalesToCSV,
     exportInventoryToCSV,
@@ -23,9 +23,10 @@ import {
     exportSeedSourceDeclarationToPDF,
     getPoultryFeedEfficiencyData, // Import new report function
     exportPlantingLogsToCSV, // Added for Planting Logs
-    exportPlantingLogsToPDF  // Added for Planting Logs
+    exportPlantingLogsToPDF,  // Added for Planting Logs
+    exportStatementOfAccountToPDF // Import the new function
 } from '@/lib/reportUtils';
-import type { PoultryFeedEfficiencyReportData } from '@/lib/reportUtils'; // Import type
+import type { PoultryFeedEfficiencyReportData, StatementOfAccountFilters } from '@/lib/reportUtils'; // Import type & new filter type
 
 // Define a common DateRangeFilters interface if not already exported from reportUtils
 interface DateRangeFilters {
@@ -49,6 +50,8 @@ export default function ReportsPage() {
   const [availableFlocks, setAvailableFlocks] = useState<Flock[]>([]);
   const [selectedFlockForEfficiency, setSelectedFlockForEfficiency] = useState<string>('');
   const [feedEfficiencyData, setFeedEfficiencyData] = useState<PoultryFeedEfficiencyReportData | null>(null);
+  const [availableCustomers, setAvailableCustomers] = useState<Customer[]>([]); // Added for statement
+  const [selectedCustomerForStatement, setSelectedCustomerForStatement] = useState<string>(''); // Added for statement
   const [isFetchingEfficiency, setIsFetchingEfficiency] = useState(false);
 
 
@@ -63,8 +66,14 @@ export default function ReportsPage() {
       const flocks = await db.flocks.where('is_deleted').notEqual(1).toArray();
       setAvailableFlocks(flocks.sort((a,b) => a.name.localeCompare(b.name)));
     };
+    const fetchCustomers = async () => {
+      let customers = await db.customers.where('is_deleted').notEqual(1).toArray();
+      customers = customers.sort((a, b) => a.name.localeCompare(b.name)); // Sort after fetching
+      setAvailableCustomers(customers);
+    };
     fetchCategories();
     fetchFlocks();
+    fetchCustomers(); // Added
   }, []);
 
   const handleGenerateFeedEfficiencyReport = async () => {
@@ -93,6 +102,19 @@ export default function ReportsPage() {
       endDate: reportEndDate || null,
     };
     exportFn(filters);
+  };
+
+  const handleExportStatementOfAccount = () => {
+    if (!selectedCustomerForStatement) {
+      alert("Please select a customer for the statement.");
+      return;
+    }
+    const filters: DateRangeFilters & { customerId: string } = { // Type for filters including customerId
+      startDate: reportStartDate || null,
+      endDate: reportEndDate || null,
+      customerId: selectedCustomerForStatement,
+    };
+    exportStatementOfAccountToPDF(filters as StatementOfAccountFilters); // Call the actual export function
   };
   
   const handleExportInventoryWithAllFilters = (
@@ -181,6 +203,34 @@ export default function ReportsPage() {
                 >
                   Export Sales (PDF)
                 </button>
+                {/* Statement of Account UI Elements */}
+                <div className="mt-4 pt-4 border-t md:col-span-2"> {/* Use md:col-span-2 to allow dropdown and button to align better */}
+                  <label htmlFor="customerForStatement" className="block text-sm font-medium text-gray-700 mb-1">
+                    Customer for Statement
+                  </label>
+                  <div className="flex items-center gap-x-2">
+                    <select
+                      id="customerForStatement"
+                      value={selectedCustomerForStatement}
+                      onChange={(e) => setSelectedCustomerForStatement(e.target.value)}
+                      className="block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm"
+                    >
+                      <option value="">-- Select Customer --</option>
+                      {availableCustomers.map(customer => (
+                        <option key={customer.id} value={customer.id}>
+                          {customer.name} ({customer.customer_type || 'Individual'})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={handleExportStatementOfAccount}
+                      disabled={!selectedCustomerForStatement}
+                      className="bg-green-700 hover:bg-green-800 text-white font-semibold py-2 px-4 rounded shadow-sm transition-colors duration-150 disabled:opacity-50 whitespace-nowrap"
+                    >
+                      Statement of Account (PDF)
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 

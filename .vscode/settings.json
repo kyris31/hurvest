@@ -1,0 +1,8 @@
+{
+  {
+  "diffEditor.maxComputationTime": 10000,
+  "diffEditor.maxFileSize": 10000
+}
+
+ 
+}
