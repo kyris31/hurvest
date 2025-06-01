@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { db, SupplierInvoice, Supplier } from '@/lib/db';
 import { PlusCircleIcon } from '@heroicons/react/24/outline';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 // Placeholder for SupplierInvoiceList component - to be created
 // import SupplierInvoiceList from '@/components/SupplierInvoiceList'; 
@@ -208,7 +209,7 @@ export default function SupplierInvoicesPage() {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {filteredSupplierInvoices.map(invoice => ( // Use filtered list here
                     <tr key={invoice.id}>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(invoice.invoice_date).toLocaleDateString()}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDateToDDMMYYYY(invoice.invoice_date)}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{invoice.invoice_number}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{supplierMap.get(invoice.supplier_id) || 'N/A'}</td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">€{(invoice.total_amount_net || 0).toFixed(2)}</td>

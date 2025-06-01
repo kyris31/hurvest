@@ -6,6 +6,7 @@ import { requestPushChanges } from '@/lib/sync';
 // import Layout from '@/components/Layout'; // No longer needed here
 import SeedlingProductionForm from '@/components/SeedlingProductionForm';
 import { PlusCircleIcon } from '@heroicons/react/24/outline';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 // Interface to hold enriched data for display
 interface EnrichedSeedlingProductionLog extends SeedlingProductionLog {
@@ -203,7 +204,7 @@ export default function SeedlingProductionPage() {
             <tbody className="bg-white divide-y divide-gray-200">
               {logs.length > 0 ? logs.map((log) => (
                 <tr key={log.id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{new Date(log.sowing_date).toLocaleDateString()}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDateToDDMMYYYY(log.sowing_date)}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{log.cropName}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{log.cropVariety}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{log.seedBatchCode}</td>

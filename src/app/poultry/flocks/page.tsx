@@ -7,6 +7,7 @@ import { db } from '@/lib/db';
 import type { Flock } from '@/lib/db';
 import FlockForm from '@/components/Poultry/FlockForm';
 import { requestPushChanges } from '@/lib/sync';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 export default function FlocksPage() {
   const [flocks, setFlocks] = useState<Flock[]>([]);
@@ -151,7 +152,7 @@ export default function FlocksPage() {
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{flock.name}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{flock.flock_type === 'egg_layer' ? 'Egg Layer' : 'Broiler'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{flock.breed || '-'}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{flock.hatch_date ? new Date(flock.hatch_date).toLocaleDateString() : '-'}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{flock.hatch_date ? formatDateToDDMMYYYY(flock.hatch_date) : '-'}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{flock.current_bird_count ?? flock.initial_bird_count ?? 0}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
                       <button

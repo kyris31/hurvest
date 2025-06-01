@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { CropPlan, Crop, Plot, CropSeason, db } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface CropPlanFormProps {
   initialData?: CropPlan | null;
@@ -169,7 +170,7 @@ export default function CropPlanForm({ initialData, onSubmit, onCancel, isSubmit
               <select id="cropSeasonId" value={cropSeasonId} onChange={e => setCropSeasonId(e.target.value)} required disabled={isSubmitting}
                       className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm">
                 <option value="">Select Crop Season</option>
-                {availableCropSeasons.map(s => <option key={s.id} value={s.id}>{s.name} ({new Date(s.start_date).toLocaleDateString()} - {new Date(s.end_date).toLocaleDateString()})</option>)}
+                {availableCropSeasons.map(s => <option key={s.id} value={s.id}>{s.name} ({formatDateToDDMMYYYY(s.start_date)} - {formatDateToDDMMYYYY(s.end_date)})</option>)}
               </select>
             </div>
             <div>

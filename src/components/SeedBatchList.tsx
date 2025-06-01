@@ -3,6 +3,7 @@
 import React from 'react';
 import { SeedBatch, Crop, Supplier } from '@/lib/db'; // Added Supplier
 import { QRCodeCanvas } from 'qrcode.react';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface SeedBatchListProps {
   seedBatches: (SeedBatch & { cropName: string; cropVariety?: string })[]; // cropName is now guaranteed, cropVariety is optional
@@ -65,7 +66,7 @@ export default function SeedBatchList({ seedBatches, suppliers, onEdit, onDelete
                   {batch.cropVariety && <span className="text-xs text-gray-500 ml-1">({batch.cropVariety})</span>}
                 </td>
                 <td className="py-3 px-5">{supplierName || <span className="text-gray-400">N/A</span>}</td>
-                <td className="py-3 px-5">{batch.purchase_date ? new Date(batch.purchase_date).toLocaleDateString() : <span className="text-gray-400">N/A</span>}</td>
+                <td className="py-3 px-5">{batch.purchase_date ? formatDateToDDMMYYYY(batch.purchase_date) : <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5 text-right">{batch.initial_quantity ?? <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5 text-right">{batch.current_quantity ?? <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5">{batch.quantity_unit || <span className="text-gray-400">N/A</span>}</td>

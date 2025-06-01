@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { PlantingLog, SeedBatch, Crop, SeedlingProductionLog, InputInventory, PurchasedSeedling, CropPlan, db } from '@/lib/db'; // Added CropPlan
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface PlantingLogFormProps {
   initialData?: PlantingLog | null;
@@ -241,7 +242,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
 
       // Validate plantingDate is after sowing_date for self-produced seedlings
       if (selectedSeedlingLog && new Date(plantingDate) <= new Date(selectedSeedlingLog.sowing_date)) {
-        setFormError(`Planting Date (${new Date(plantingDate).toLocaleDateString()}) must be after the Sowing Date (${new Date(selectedSeedlingLog.sowing_date).toLocaleDateString()}).`);
+        setFormError(`Planting Date (${formatDateToDDMMYYYY(plantingDate)}) must be after the Sowing Date (${formatDateToDDMMYYYY(selectedSeedlingLog.sowing_date)}).`);
         return;
       }
 
@@ -368,7 +369,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
               <option value="">None - Record ad-hoc planting</option>
               {availableCropPlans.map(plan => (
                 <option key={plan.id} value={plan.id}>
-                  {plan.plan_name} (Planned: {new Date(plan.planned_sowing_date || plan.planned_transplant_date || Date.now()).toLocaleDateString()})
+                  {plan.plan_name} (Planned: {formatDateToDDMMYYYY(plan.planned_sowing_date || plan.planned_transplant_date || new Date().toISOString())})
                 </option>
               ))}
             </select>
@@ -450,7 +451,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
                 <option value="">Select a Seedling Log</option>
                 {availableSeedlingLogs.map(sl => (
                   <option key={sl.id} value={sl.id}>
-                    {sl.cropName} - Sown: {new Date(sl.sowing_date).toLocaleDateString()} (Avail: {sl.current_seedlings_available})
+                    {sl.cropName} - Sown: {formatDateToDDMMYYYY(sl.sowing_date)} (Avail: {sl.current_seedlings_available})
                   </option>
                 ))}
               </select>

@@ -2,6 +2,7 @@
 
 /**
  * Formats a date string or Date object to DD/MM/YYYY format.
+ * Prioritizes parsing YYYY-MM-DD and DD/MM/YYYY string formats.
  * Returns 'N/A' for null/undefined input.
  * Returns 'Invalid Date' if the input cannot be parsed into a valid date.
  */
@@ -11,56 +12,77 @@ export function formatDateToDDMMYYYY(dateInput: string | Date | null | undefined
   }
 
   let date: Date;
+  let useUtcGetters = false; // Flag to determine if UTC getters should be used
 
   if (typeof dateInput === 'string') {
-    // Try to handle YYYY-MM-DD, or common US/Euro formats that Date constructor might parse
-    // Standardize by trying to parse it robustly
-    const isoMatch = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/); // YYYY-MM-DD
+    // 1. Try YYYY-MM-DD (allows optional time component)
+    const isoMatch = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/);
     if (isoMatch) {
-      date = new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+      date = new Date(Date.UTC(
+        parseInt(isoMatch[1], 10),
+        parseInt(isoMatch[2], 10) - 1, // Month is 0-indexed for Date.UTC
+        parseInt(isoMatch[3], 10)
+      ));
+      useUtcGetters = true;
     } else {
-      // For other string formats, new Date() can be unreliable across browsers/locales
-      // Attempting a more direct parse for DD/MM/YYYY or MM/DD/YYYY like structures
-      const parts = dateInput.match(/(\d{1,2})[/\.-](\d{1,2})[/\.-](\d{4})/);
-      if (parts) {
-        // Assuming DD/MM/YYYY for European context if ambiguous, but this is risky.
-        // A more robust solution would require knowing the input string's format.
-        // For now, let's try to be somewhat smart. If first part > 12, assume it's day.
-        let day, month, year;
-        const part1 = parseInt(parts[1], 10);
-        const part2 = parseInt(parts[2], 10);
-        year = parseInt(parts[3], 10);
+      // 2. Try DD/MM/YYYY
+      const euroMatch = dateInput.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (euroMatch) {
+        const dayPart = parseInt(euroMatch[1], 10);
+        const monthPart = parseInt(euroMatch[2], 10);
+        const yearPart = parseInt(euroMatch[3], 10);
 
-        if (part1 > 12) { // Likely DD/MM/YYYY
-          day = part1;
-          month = part2;
-        } else if (part2 > 12) { // Likely MM/DD/YYYY
-          day = part2;
-          month = part1;
+        // Basic validation for day and month parts from regex match
+        if (monthPart >= 1 && monthPart <= 12 && dayPart >= 1 && dayPart <= 31) {
+            date = new Date(Date.UTC(yearPart, monthPart - 1, dayPart));
+            // Check if the constructed date is valid and matches the input parts
+            // (e.g., new Date(Date.UTC(2023, 1, 30)) would become March 2nd, 2023)
+            if (date.getUTCFullYear() === yearPart &&
+                date.getUTCMonth() === monthPart - 1 &&
+                date.getUTCDate() === dayPart) {
+                useUtcGetters = true;
+            } else {
+                // Invalid date parts (e.g., 30/02/2023 led to date rollover)
+                date = new Date(NaN); // Mark as invalid
+            }
         } else {
-            // Ambiguous (e.g., 01/02/2023). Default to MM/DD if navigator.language suggests US, else DD/MM.
-            // This is a heuristic. For true robustness, input format should be known.
-            // Forcing DD/MM/YYYY as per request.
-            day = part1;
-            month = part2;
+            // Invalid month/day numbers (e.g. 15/13/2023)
+            date = new Date(NaN);
         }
-        date = new Date(year, month - 1, day);
-
       } else {
-        date = new Date(dateInput); // Fallback to direct constructor
+        // 3. Fallback to new Date() for other formats (e.g., "MMM d, yyyy", or potentially MM/DD/YYYY)
+        // This parsing can be locale-dependent and ambiguous.
+        date = new Date(dateInput);
+        // For `new Date(string)`, components are usually local, so useUtcGetters remains false.
       }
     }
   } else {
     date = dateInput; // It's already a Date object
+    // For existing Date objects, assume local getters are appropriate (useUtcGetters remains false).
   }
 
   if (isNaN(date.getTime())) {
+    // This catches explicitly set new Date(NaN) or if new Date(dateInput) parsing failed
     return 'Invalid Date';
   }
 
-  const day = String(date.getDate()).padStart(2, '0');
-  const month = String(date.getMonth() + 1).padStart(2, '0'); // Month is 0-indexed
-  const year = date.getFullYear();
+  let dayValue: number;
+  let monthValue: number; // 1-indexed month
+  let yearValue: number;
+
+  if (useUtcGetters) {
+    dayValue = date.getUTCDate();
+    monthValue = date.getUTCMonth() + 1; // getUTCMonth is 0-indexed
+    yearValue = date.getUTCFullYear();
+  } else {
+    dayValue = date.getDate();
+    monthValue = date.getMonth() + 1; // getMonth is 0-indexed
+    yearValue = date.getFullYear();
+  }
   
-  return `${day}/${month}/${year}`;
+  const dayStr = String(dayValue).padStart(2, '0');
+  const monthStr = String(monthValue).padStart(2, '0');
+  const yearStr = String(yearValue); // getFullYear returns a number, String() converts
+
+  return `${dayStr}/${monthStr}/${yearStr}`;
 }

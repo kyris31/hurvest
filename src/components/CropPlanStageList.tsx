@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { CropPlanStage } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface CropPlanStageListProps {
   stages: CropPlanStage[];
@@ -67,7 +68,7 @@ export default function CropPlanStageList({
               <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-gray-900">{stage.stage_name}</td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">{formatStageType(stage.stage_type)}</td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {new Date(stage.planned_start_date).toLocaleDateString()}
+                {formatDateToDDMMYYYY(stage.planned_start_date)}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500 text-center">{stage.planned_duration_days}</td>
               <td className="px-4 py-3 whitespace-nowrap text-sm">

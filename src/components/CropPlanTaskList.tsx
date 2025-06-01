@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { CropPlanTask } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface CropPlanTaskListProps {
   tasks: CropPlanTask[];
@@ -55,7 +56,7 @@ export default function CropPlanTaskList({
                 {task.notes && <p className="text-xs text-gray-500 mt-1">Notes: {task.notes}</p>}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-500">
-                {new Date(task.planned_due_date).toLocaleDateString()}
+                {formatDateToDDMMYYYY(task.planned_due_date)}
               </td>
               <td className="px-4 py-3 whitespace-nowrap text-sm">
                 <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${

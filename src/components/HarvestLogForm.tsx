@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { HarvestLog, PlantingLog, SeedBatch, Crop, Tree, db } from '@/lib/db'; // Added Tree
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface HarvestLogFormProps {
   initialData?: HarvestLog | null;
@@ -236,7 +237,7 @@ export default function HarvestLogForm({ initialData, onSubmit, onCancel, isSubm
                 <option value="">Select a Planting Log</option>
                 {availablePlantingLogs.map(pl => {
                   try {
-                    let label = `${new Date(pl.planting_date).toLocaleDateString()} - `;
+                    let label = `${formatDateToDDMMYYYY(pl.planting_date)} - `;
                     const crop = pl.cropDetails;
                     if (crop) {
                       label += crop.name || 'Unnamed Crop';

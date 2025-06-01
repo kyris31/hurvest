@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, FormEvent } from 'react';
 import { db, Reminder, PlantingLog } from '@/lib/db'; // Removed unused Crop, SeedBatch
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface ReminderFormProps {
   existingReminder?: Reminder | null;
@@ -55,7 +56,7 @@ const ReminderForm: React.FC<ReminderFormProps> = ({ existingReminder, onClose }
           }
           return {
             ...pl,
-            displayLabel: `${new Date(pl.planting_date).toLocaleDateString()} - ${cropName} (${pl.plot_affected || pl.location_description || 'N/A'})`
+            displayLabel: `${formatDateToDDMMYYYY(pl.planting_date)} - ${cropName} (${pl.plot_affected || pl.location_description || 'N/A'})`
           };
         });
         setAvailablePlantingLogs(enrichedPlantingLogs.sort((a,b) => new Date(b.planting_date).getTime() - new Date(a.planting_date).getTime()));

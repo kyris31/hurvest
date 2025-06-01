@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { PlantingLog, SeedBatch, Crop, InputInventory, PurchasedSeedling, SeedlingProductionLog } from '@/lib/db'; // Added PurchasedSeedling and SeedlingProductionLog
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface PlantingLogListProps {
   plantingLogs: (PlantingLog & { cropNameForSort: string; cropVarietyForSort: string })[];
@@ -63,13 +64,13 @@ export default function PlantingLogList({
             const cropVariety = log.cropVarietyForSort || <span className="text-gray-400">N/A</span>;
             return (
               <tr key={log.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
-                <td className="py-3 px-5">{new Date(log.planting_date).toLocaleDateString()}</td>
+                <td className="py-3 px-5">{formatDateToDDMMYYYY(log.planting_date)}</td>
                 <td className="py-3 px-5">{cropName}</td>
                 <td className="py-3 px-5">{cropVariety}</td>
                 <td className="py-3 px-5">{log.location_description || <span className="text-gray-400">N/A</span>}</td>
                 <td className="py-3 px-5 text-right">{log.quantity_planted}</td>
               <td className="py-3 px-5">{log.quantity_unit || <span className="text-gray-400">N/A</span>}</td>
-              <td className="py-3 px-5">{log.expected_harvest_date ? new Date(log.expected_harvest_date).toLocaleDateString() : <span className="text-gray-400">N/A</span>}</td>
+              <td className="py-3 px-5">{log.expected_harvest_date ? formatDateToDDMMYYYY(log.expected_harvest_date) : <span className="text-gray-400">N/A</span>}</td>
               <td className="py-3 px-5 text-center">
                 {log._synced === 0 ? (
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">

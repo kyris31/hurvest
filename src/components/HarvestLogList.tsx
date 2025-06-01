@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { HarvestLog, Tree } from '@/lib/db'; // Removed PlantingLog, SeedBatch, Crop as direct props
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 // Define the structure of the enriched harvest log item
 interface EnrichedHarvestLog extends HarvestLog {
@@ -56,7 +57,7 @@ export default function HarvestLogList({
         <tbody className="text-gray-700">
           {activeHarvestLogs.map((log) => (
             <tr key={log.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
-              <td className="py-3 px-5">{new Date(log.harvest_date).toLocaleDateString()}</td>
+              <td className="py-3 px-5">{formatDateToDDMMYYYY(log.harvest_date)}</td>
               <td className="py-3 px-5">
                 {log.sourceDisplay}
                 {log.varietyDisplay && <span className="text-xs text-gray-500 ml-1">({log.varietyDisplay})</span>}

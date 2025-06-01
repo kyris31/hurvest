@@ -5,6 +5,7 @@ import { db, Reminder, Flock } from '@/lib/db'; // Keep existing db imports
 import { XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line } from 'recharts';
 import Link from 'next/link';
 import { calculateDashboardMetrics, DashboardMetrics, DateRangeFilters } from '@/lib/reportUtils'; // Import new function and types
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface MetricCardProps {
   title: string;
@@ -229,7 +230,7 @@ export default function DashboardPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-gray-900 truncate">{reminder.activity_type}</p>
                       <p className="text-sm text-gray-500 truncate">
-                        Flock: {reminder.flockName} - Due: {new Date(reminder.reminder_date).toLocaleDateString()}
+                        Flock: {reminder.flockName} - Due: {formatDateToDDMMYYYY(reminder.reminder_date)}
                       </p>
                     </div>
                   </div>

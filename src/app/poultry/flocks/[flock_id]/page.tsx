@@ -10,6 +10,7 @@ import FeedLogForm from '@/components/Poultry/FeedLogForm';
 import ReminderForm from '@/components/ReminderForm';
 import { requestPushChanges } from '@/lib/sync';
 import { CheckCircleIcon, XCircleIcon, TrashIcon, PencilSquareIcon } from '@heroicons/react/24/outline'; // Added PencilSquareIcon
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 export default function FlockDetailPage() {
   const params = useParams();
@@ -240,7 +241,7 @@ export default function FlockDetailPage() {
           Type: {flock.flock_type === 'egg_layer' ? 'Egg Layer' : 'Broiler'} | Breed: {flock.breed || 'N/A'}
         </p>
         <p className="text-sm text-gray-600">
-          Hatch Date: {flock.hatch_date ? new Date(flock.hatch_date).toLocaleDateString() : 'N/A'} ({calculateAge(flock.hatch_date)})
+          Hatch Date: {flock.hatch_date ? formatDateToDDMMYYYY(flock.hatch_date) : 'N/A'} ({calculateAge(flock.hatch_date)})
         </p>
         <p className="text-sm text-gray-600">
           Initial Birds: {flock.initial_bird_count ?? 'N/A'} | Current Birds: {flock.current_bird_count ?? flock.initial_bird_count ?? 'N/A'}
@@ -288,7 +289,7 @@ export default function FlockDetailPage() {
               <li key={record.id} className={`p-3 bg-gray-50 rounded shadow-sm ${isDeletingRecord === record.id ? 'opacity-50' : ''}`}>
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="font-medium">{new Date(record.record_date).toLocaleDateString()} - {record.record_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</p>
+                    <p className="font-medium">{formatDateToDDMMYYYY(record.record_date)} - {record.record_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</p>
                     <p className="text-sm text-gray-700">Details: {record.details}</p>
                     {record.quantity !== undefined && <p className="text-sm text-gray-700">Quantity: {record.quantity}</p>}
                     {record.weight_kg_total !== undefined && <p className="text-sm text-gray-700">Total Weight: {record.weight_kg_total} kg</p>}
@@ -358,7 +359,7 @@ export default function FlockDetailPage() {
               <li key={log.id} className={`p-3 bg-gray-50 rounded shadow-sm ${isDeletingFeedLog === log.id ? 'opacity-50' : ''}`}>
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="font-medium">Date: {new Date(log.feed_date).toLocaleDateString()}</p>
+                    <p className="font-medium">Date: {formatDateToDDMMYYYY(log.feed_date)}</p>
                     {log.feed_type_id && (
                       <p className="text-sm text-gray-700">
                         Feed Type: {feedTypeMap.get(log.feed_type_id) || log.feed_type_id}

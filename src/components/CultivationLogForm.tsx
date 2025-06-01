@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 // Ensure all necessary types are imported, including CultivationActivityPlantingLink
 import { CultivationLog, PlantingLog, InputInventory, SeedBatch, Crop, SeedlingProductionLog, PurchasedSeedling, db, CultivationActivityPlantingLink, CultivationActivityUsedInput } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 // Define UsedInputItem interface locally if it's specific to this form's state management
 interface UsedInputItem {
@@ -399,7 +400,7 @@ export default function CultivationLogForm({
                           disabled={!isSelectedInThisRow && input.display_stock <= 0}
                         >
                           {input.name} ({input.type || 'N/A'})
-                          {input.purchase_date ? ` - P:${new Date(input.purchase_date).toLocaleDateString()}` : ''}
+                          {input.purchase_date ? ` - P:${formatDateToDDMMYYYY(input.purchase_date)}` : ''}
                           {' '}- Stock: {input.display_stock ?? 'N/A'} {input.quantity_unit || ''}
                         </option>
                       );

@@ -5,6 +5,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { db, SupplierInvoice, Supplier, Crop, InputInventory, SupplierInvoiceItem } from '@/lib/db';
 import Link from 'next/link';
 import SupplierInvoiceItemForm from '@/components/SupplierInvoiceItemForm';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 type SupplierInvoiceItemFormData = Omit<
   SupplierInvoiceItem,
@@ -562,7 +563,7 @@ export default function EditSupplierInvoicePage() {
           Edit Supplier Invoice: {invoice.invoice_number}
         </h1>
         <p className="text-sm text-gray-600">Supplier: {supplierName}</p>
-        <p className="text-sm text-gray-600">Invoice Date: {new Date(invoice.invoice_date).toLocaleDateString()}</p>
+        <p className="text-sm text-gray-600">Invoice Date: {formatDateToDDMMYYYY(invoice.invoice_date)}</p>
         <p className="text-sm text-gray-600">Status: <span className="font-medium">{invoice.status}</span></p>
       </header>
 
@@ -572,7 +573,7 @@ export default function EditSupplierInvoicePage() {
         <h2 className="text-lg font-medium text-gray-900 mb-4">Invoice Header</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <p><strong>Invoice Number:</strong> {invoice.invoice_number}</p>
-            <p><strong>Invoice Date:</strong> {new Date(invoice.invoice_date).toLocaleDateString()}</p>
+            <p><strong>Invoice Date:</strong> {formatDateToDDMMYYYY(invoice.invoice_date)}</p>
             <p><strong>Supplier:</strong> {supplierName}</p>
             <p><strong>Status:</strong> {invoice.status}</p>
             <p><strong>Total Gross (from items):</strong> €{(displayTotalGrossFromItems || 0).toFixed(2)}</p>

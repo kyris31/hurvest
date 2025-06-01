@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import type { Sale } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface RecordPaymentModalProps {
   sale: Sale;
@@ -64,7 +65,7 @@ export default function RecordPaymentModal({ sale, isOpen, onClose, onRecordPaym
         <h2 className="text-xl font-bold mb-4 text-gray-800">Record Payment for Sale #{sale.id.substring(0, 8)}...</h2>
         
         <div className="mb-3 text-sm">
-          <p>Sale Date: <span className="font-medium">{new Date(sale.sale_date).toLocaleDateString()}</span></p>
+          <p>Sale Date: <span className="font-medium">{formatDateToDDMMYYYY(sale.sale_date)}</span></p>
           <p>Total Amount: <span className="font-medium">€{(sale.total_amount || 0).toFixed(2)}</span></p>
           <p>Currently Paid: <span className="font-medium">€{(sale.amount_paid || 0).toFixed(2)}</span></p>
           <p>Remaining Balance: <span className={`font-bold ${remainingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>

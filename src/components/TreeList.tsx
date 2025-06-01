@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Tree } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface TreeListProps {
   trees: Tree[];
@@ -38,7 +39,7 @@ export default function TreeList({ trees, onEdit, onDelete, isDeleting }: TreeLi
               <td className="py-3 px-5">{tree.identifier || 'N/A'}</td>
               <td className="py-3 px-5">{tree.species || 'N/A'}</td>
               <td className="py-3 px-5">{tree.variety || 'N/A'}</td>
-              <td className="py-3 px-5">{tree.planting_date ? new Date(tree.planting_date).toLocaleDateString() : 'N/A'}</td>
+              <td className="py-3 px-5">{tree.planting_date ? formatDateToDDMMYYYY(tree.planting_date) : 'N/A'}</td>
               <td className="py-3 px-5">{tree.location_description || 'N/A'}</td>
               <td className="py-3 px-5">{tree.plot_affected || 'N/A'}</td>
               <td className="py-3 px-5 text-center">

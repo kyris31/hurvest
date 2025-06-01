@@ -5,6 +5,7 @@ import { db, Reminder } from '@/lib/db'; // Removed unused PlantingLog, Crop, Se
 // import Layout from '@/components/Layout'; // Layout is handled by RootLayout
 import ReminderForm from '@/components/ReminderForm'; // Import the form
 import { PlusCircleIcon, CheckCircleIcon, XCircleIcon, PencilSquareIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface EnrichedReminder extends Reminder {
   plantingLogInfo?: string;
@@ -57,7 +58,7 @@ export default function RemindersPage() {
                 }
             }
             cropName = cName;
-            plantingLogInfo = `${cName} (${pLog.plot_affected || pLog.location_description || 'N/A'}) - Planted: ${new Date(pLog.planting_date).toLocaleDateString()}`;
+            plantingLogInfo = `${cName} (${pLog.plot_affected || pLog.location_description || 'N/A'}) - Planted: ${formatDateToDDMMYYYY(pLog.planting_date)}`;
           }
         }
         if (reminder.flock_id) {

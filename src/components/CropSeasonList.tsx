@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { CropSeason } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface CropSeasonListProps {
   cropSeasons: CropSeason[];
@@ -33,8 +34,8 @@ export default function CropSeasonList({ cropSeasons, onEdit, onDelete, isDeleti
           {activeSeasons.map((season) => (
             <tr key={season.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
               <td className="py-3 px-5">{season.name}</td>
-              <td className="py-3 px-5">{new Date(season.start_date).toLocaleDateString()}</td>
-              <td className="py-3 px-5">{new Date(season.end_date).toLocaleDateString()}</td>
+              <td className="py-3 px-5">{formatDateToDDMMYYYY(season.start_date)}</td>
+              <td className="py-3 px-5">{formatDateToDDMMYYYY(season.end_date)}</td>
               <td className="py-3 px-5 truncate max-w-xs">{season.description || <span className="text-gray-400">N/A</span>}</td>
               <td className="py-3 px-5 text-center whitespace-nowrap">
                 <button

@@ -9,6 +9,7 @@ import CropPlanStageList from '@/components/CropPlanStageList';
 import CropPlanStageForm, { CropPlanStageSubmitData } from '@/components/CropPlanStageForm'; // Import CropPlanStageSubmitData
 import CropPlanTaskList from '@/components/CropPlanTaskList';
 import { requestPushChanges } from '@/lib/sync';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 export default function CropPlanDetailPage() {
   const params = useParams();

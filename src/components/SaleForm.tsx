@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Sale, SaleItem, Customer, HarvestLog, InputInventory, db } from '@/lib/db';
 import CustomerForm from './CustomerForm';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface SaleFormProps {
   initialData?: Sale & { items?: SaleItem[] };
@@ -109,7 +110,7 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
         if (varietyName) {
           displayName += ` - ${varietyName}`;
         }
-        displayName += ` (Harvested: ${new Date(h.harvest_date).toLocaleDateString()})`;
+        displayName += ` (Harvested: ${formatDateToDDMMYYYY(h.harvest_date)})`;
 
         products.push({
           id: h.id,

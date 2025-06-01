@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { CultivationLog, PlantingLog, InputInventory, SeedBatch, Crop, CultivationActivityUsedInput, CultivationActivityPlantingLink } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils'; // Import the date formatting utility
 
 // Interface for enriched PlantingLog object
 interface EnrichedPlantingLog extends PlantingLog {
@@ -86,7 +87,7 @@ export default function CultivationLogList({
     }
     const locationDesc = pLog.location_description || 'N/A';
     console.log(`[CultivationLogList] Location Description: ${locationDesc}`);
-    const resultString = `${new Date(pLog.planting_date).toLocaleDateString()} - ${cropName} (${locationDesc})`;
+    const resultString = `${formatDateToDDMMYYYY(pLog.planting_date)} - ${cropName} (${locationDesc})`;
     console.log(`[CultivationLogList] Resulting string: ${resultString}`);
     return resultString;
   };
@@ -136,7 +137,7 @@ export default function CultivationLogList({
         <tbody className="text-gray-700">
           {activeCultivationLogs.map((log) => (
             <tr key={log.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
-              <td className="py-3 px-5">{new Date(log.activity_date).toLocaleDateString()}</td>
+              <td className="py-3 px-5">{formatDateToDDMMYYYY(log.activity_date)}</td>
               <td className="py-3 px-5">{getPlantingLogInfo(log.id)}</td>
               <td className="py-3 px-5">{log.activity_type}</td>
               {/* Updated to display multiple inputs if necessary, and remove separate qty/unit columns for this view */}

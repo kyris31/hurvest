@@ -6,6 +6,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { useReactToPrint } from 'react-to-print';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 // Hardcoded company details for now
 const COMPANY_DETAILS = {
@@ -298,7 +299,7 @@ export default function StatementOfAccountPage() {
               {currentCustomer.contact_info && <p className="text-gray-600">{currentCustomer.contact_info}</p>}
             </div>
             <div className="text-right">
-              <p className="text-gray-600"><span className="font-semibold">Statement Date:</span> {new Date().toLocaleDateString()}</p>
+              <p className="text-gray-600"><span className="font-semibold">Statement Date:</span> {formatDateToDDMMYYYY(new Date())}</p>
               {/* Add date range here if implemented */}
             </div>
           </div>
@@ -318,7 +319,7 @@ export default function StatementOfAccountPage() {
               <tbody className="bg-white divide-y divide-gray-200">
                 {statementInvoices.map((invoice) => (
                   <tr key={invoice.id}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{new Date(invoice.invoice_date).toLocaleDateString()}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDateToDDMMYYYY(invoice.invoice_date)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{invoice.invoice_number}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">Invoice for Sale ID: {invoice.sale_id}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">

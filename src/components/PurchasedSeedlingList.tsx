@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { PurchasedSeedling, Crop, Supplier } from '@/lib/db';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface PurchasedSeedlingListProps {
   purchasedSeedlings: PurchasedSeedling[];
@@ -66,7 +67,7 @@ export default function PurchasedSeedlingList({
               <td className="py-3 px-4">{seedling.name}</td>
               <td className="py-3 px-4">{getCropDisplay(seedling.crop_id)}</td>
               <td className="py-3 px-4">{getSupplierName(seedling.supplier_id)}</td>
-              <td className="py-3 px-4">{seedling.purchase_date ? new Date(seedling.purchase_date).toLocaleDateString() : <span className="text-gray-400">N/A</span>}</td>
+              <td className="py-3 px-4">{seedling.purchase_date ? formatDateToDDMMYYYY(seedling.purchase_date) : <span className="text-gray-400">N/A</span>}</td>
               <td className="py-3 px-4 text-right">{seedling.initial_quantity}</td>
               <td className="py-3 px-4 text-right">{seedling.current_quantity}</td>
               <td className="py-3 px-4">{seedling.quantity_unit || <span className="text-gray-400">N/A</span>}</td>

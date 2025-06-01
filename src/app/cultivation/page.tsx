@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { db, CultivationLog, PlantingLog, SeedBatch, Crop, InputInventory, CultivationActivityUsedInput, CultivationActivityPlantingLink, SeedlingProductionLog, PurchasedSeedling } from '@/lib/db';
 import { requestPushChanges } from '@/lib/sync';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils'; // Import the date formatting utility
 import { useDbContext } from '@/contexts/DbContext';
 import CultivationLogList from '@/components/CultivationLogList';
 import CultivationLogForm from '@/components/CultivationLogForm';
@@ -120,7 +121,7 @@ export default function CultivationLogsPage() {
           sourceDetails = `Input Item`; // Should ideally not be the primary source for "crop" context
         }
         
-        const displayLabel = `${new Date(pl.planting_date).toLocaleDateString()} - ${cropName}${varietyName ? ` (${varietyName})` : ''} - ${sourceDetails} - Plot: ${pl.plot_affected || pl.location_description || 'N/A'}`;
+        const displayLabel = `${formatDateToDDMMYYYY(pl.planting_date)} - ${cropName}${varietyName ? ` (${varietyName})` : ''} - ${sourceDetails} - Plot: ${pl.plot_affected || pl.location_description || 'N/A'}`;
         return { ...pl, cropName, displayLabel };
       });
       

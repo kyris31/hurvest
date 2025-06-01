@@ -3,6 +3,7 @@
 import React from 'react';
 import { CropPlan, Crop, Plot, CropSeason } from '@/lib/db';
 import Link from 'next/link';
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils';
 
 interface CropPlanListProps {
   cropPlans: CropPlan[];
@@ -69,7 +70,7 @@ export default function CropPlanList({
                 <td className="py-3 px-5">{cropName}</td>
                 <td className="py-3 px-5">{plotName}</td>
                 <td className="py-3 px-5">{seasonName}</td>
-                <td className="py-3 px-5">{displayDate ? new Date(displayDate).toLocaleDateString() : 'N/A'}</td>
+                <td className="py-3 px-5">{displayDate ? formatDateToDDMMYYYY(displayDate) : 'N/A'}</td>
                 <td className="py-3 px-5">
                   <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
                     plan.status === 'PLANNED' ? 'bg-blue-100 text-blue-800' :
