@@ -18,6 +18,7 @@ declare global {
 }
 import { saveAs } from 'file-saver';
 import { APP_NAME, KK_BIOFRESH_INFO } from '@/config'; // Using alias, assuming config.ts will be moved
+import { formatDateToDDMMYYYY } from './dateUtils'; // Import the date formatting utility
 
 // Removed Unused CompanyInfo interface
 
@@ -89,7 +90,7 @@ async function getFullSaleDetails(saleId: string) {
         if (item.harvest_log_id) {
             const harvestLog = await db.harvestLogs.get(item.harvest_log_id);
             if (harvestLog && harvestLog.is_deleted !== 1) {
-                productDetails = `(Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
+                productDetails = `(Harvested: ${formatDateToDDMMYYYY(harvestLog.harvest_date)})`;
                 // Prioritize tree_id for product name if available
                 if (harvestLog.tree_id) {
                     const tree = treesMap.get(harvestLog.tree_id);
@@ -363,7 +364,7 @@ const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textS
     invoiceInfoY = drawText(mainTitle, headerRightX, invoiceInfoY, { font: boldFont, size: 18 });
     invoiceInfoY -= 3;
     invoiceInfoY = drawText(`Number: ${invoiceRecord.invoice_number}`, headerRightX, invoiceInfoY, { font: boldFont, size: 9 });
-    invoiceInfoY = drawText(`Date: ${new Date(invoiceRecord.invoice_date).toLocaleDateString()}`, headerRightX, invoiceInfoY, { size: 9 });
+    invoiceInfoY = drawText(`Date: ${formatDateToDDMMYYYY(invoiceRecord.invoice_date)}`, headerRightX, invoiceInfoY, { size: 9 });
     invoiceInfoY = drawText(`Sale ID: ${sale.id.substring(0,13)}...`, headerRightX, invoiceInfoY, { size: 9 });
     invoiceInfoY = drawText(`CYBIO 001`, headerRightX, invoiceInfoY, { size: 9 }); // Added CYBIO 001
 

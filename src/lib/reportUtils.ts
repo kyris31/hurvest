@@ -1,5 +1,6 @@
 import { db } from './db';
 import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput, Tree } from './db'; // Added Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput, Tree
+import { formatDateToDDMMYYYY } from './dateUtils'; // Import the date formatting utility
 import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
@@ -461,7 +462,7 @@ async function getAllDetailedSalesForReport(filters?: DateRangeFilters): Promise
         if (itemsForThisSale.length === 0) { // Include sales even if they have no items (though unlikely)
             reportItems.push({
                 saleId: sale.id,
-                saleDate: new Date(sale.sale_date).toLocaleDateString(),
+                saleDate: formatDateToDDMMYYYY(sale.sale_date),
                 customerName: customer?.name || 'N/A',
                 invoiceNumber: invoice?.invoice_number || 'N/A',
                 invoiceStatus: invoice?.status || 'N/A',
@@ -481,7 +482,7 @@ async function getAllDetailedSalesForReport(filters?: DateRangeFilters): Promise
                 if (item.harvest_log_id) {
                     const harvestLog = harvestLogMap.get(item.harvest_log_id);
                     if (harvestLog) {
-                        productDetails = `(Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
+                        productDetails = `(Harvested: ${formatDateToDDMMYYYY(harvestLog.harvest_date)})`;
                         let crop: Crop | undefined;
                         let potentialProductNameFromInv: string | undefined;
                         let potentialProductNameFromPS: string | undefined;
@@ -979,7 +980,7 @@ async function getAllHarvestLogsForReport(filters: DateRangeFilters): Promise<Ha
             pLog = plantingLogs.find(pl => pl.id === hLog.planting_log_id);
             if (pLog) {
                 location = pLog.location_description || 'N/A';
-                plantingDate = new Date(pLog.planting_date).toLocaleDateString();
+                plantingDate = formatDateToDDMMYYYY(pLog.planting_date);
                 if (pLog.seed_batch_id) {
                     const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
                     if (sBatch) {
@@ -1001,16 +1002,16 @@ async function getAllHarvestLogsForReport(filters: DateRangeFilters): Promise<Ha
                 cropName = tree.identifier || tree.species || 'Tree (Unknown Name/Species)';
                 cropVariety = tree.variety;
                 location = tree.location_description || 'N/A';
-                plantingDate = tree.planting_date ? new Date(tree.planting_date).toLocaleDateString() : undefined;
+                plantingDate = tree.planting_date ? formatDateToDDMMYYYY(tree.planting_date) : undefined;
                 // cropType and cropNotes might not be directly applicable or available for trees in the same way
             }
         }
 
         reportItems.push({
             harvestId: hLog.id,
-            harvestDate: new Date(hLog.harvest_date).toLocaleDateString(),
+            harvestDate: formatDateToDDMMYYYY(hLog.harvest_date),
             plantingLogId: hLog.planting_log_id,
-            plantingDate: plantingDate,
+            plantingDate: plantingDate, // Already formatted or undefined
             cropName: cropName,
             cropVariety: cropVariety,
             cropType: cropType,
@@ -1401,7 +1402,7 @@ async function addPdfHeader(pdfDoc: PDFDocument, page: PDFPage, yPos: { y: numbe
     });
     
     // Date (align with right margin, ensure it's below logo or at a similar height)
-    const dateText = `Generated: ${new Date().toLocaleDateString()}`;
+    const dateText = `Generated: ${formatDateToDDMMYYYY(new Date())}`;
     const dateSize = 8;
     const dateWidth = font.widthOfTextAtSize(dateText, dateSize);
     
@@ -1880,7 +1881,7 @@ async function getSeedlingLifecycleReportData(filters?: DateRangeFilters): Promi
 
         reportItems.push({
             cropName: crop?.name || 'N/A',
-            sowingDate: new Date(sl.sowing_date).toLocaleDateString(),
+            sowingDate: formatDateToDDMMYYYY(sl.sowing_date),
             quantitySownDisplay: `${sl.quantity_sown_value} ${sl.sowing_unit_from_batch || 'units'}`,
             seedlingsProduced: sl.actual_seedlings_produced,
             seedlingsTransplanted,
@@ -3180,7 +3181,7 @@ async function getAllPlantingLogsForReport(filters?: DateRangeFilters): Promise<
   for (const log of plantingLogs) {
     const cropDetails = await getCropDetailsForReport(log, crops, seedBatches, purchasedSeedlings, seedlingProductionLogs);
     reportItems.push({
-      plantingDate: new Date(log.planting_date).toLocaleDateString(),
+      plantingDate: formatDateToDDMMYYYY(log.planting_date),
       cropName: cropDetails.cropName,
       cropVariety: cropDetails.cropVariety,
       sourceType: cropDetails.sourceType,
@@ -3188,7 +3189,7 @@ async function getAllPlantingLogsForReport(filters?: DateRangeFilters): Promise<
       location: log.location_description || 'N/A',
       quantityPlanted: log.quantity_planted,
       quantityUnit: log.quantity_unit || 'N/A',
-      expectedHarvestDate: log.expected_harvest_date ? new Date(log.expected_harvest_date).toLocaleDateString() : 'N/A',
+      expectedHarvestDate: formatDateToDDMMYYYY(log.expected_harvest_date),
       status: log.status ? log.status.charAt(0).toUpperCase() + log.status.slice(1) : 'Active',
       notes: log.notes || '',
     });
@@ -3528,8 +3529,8 @@ export async function exportStatementOfAccountToPDF(filters: StatementOfAccountF
       });
     }
     y -= 14;
-
-    const dateRangeText = `Statement Period: ${reportData.startDate ? new Date(reportData.startDate).toLocaleDateString() : 'Beginning of records'} - ${reportData.endDate ? new Date(reportData.endDate).toLocaleDateString() : 'End of records'}`;
+  
+    const dateRangeText = `Statement Period: ${reportData.startDate ? formatDateToDDMMYYYY(reportData.startDate) : 'Beginning of records'} - ${reportData.endDate ? formatDateToDDMMYYYY(reportData.endDate) : 'End of records'}`;
     page.drawText(dateRangeText, { x: margin, y, font: mainFont, size: 10 });
     y -= (14 * 1.5);
     
@@ -3568,11 +3569,11 @@ export async function exportStatementOfAccountToPDF(filters: StatementOfAccountF
             let headerX;
             // Indices: 0:Date, 1:Description, 2:Notes, 3:Debit, 4:Credit, 5:Balance
             if (i === 0 || i === 1) { // Left-align Date, Description
-              headerX = currentX + 2;
-            } else if (i === 2) { // Center Notes
+              headerX = currentX + 2; // Small left padding
+            } else if (i === 2) { // Center Notes header
               headerX = currentX + (colWidths[i] - headerWidth) / 2;
-            } else { // Right-align Debit, Credit, Balance headers
-              headerX = currentX + colWidths[i] - headerWidth - 2;
+            } else { // Explicitly Right-align Debit, Credit, Balance headers
+              headerX = (currentX + colWidths[i]) - headerWidth - 2; // -2 for slight padding from right edge
             }
             page.drawText(header, { x: headerX, y: y, font: boldFont, size: 9 });
             currentX += colWidths[i];
@@ -3589,7 +3590,7 @@ export async function exportStatementOfAccountToPDF(filters: StatementOfAccountF
       }
 
       const rowData = [
-        new Date(tx.date).toLocaleDateString(),
+        formatDateToDDMMYYYY(tx.date),
         tx.description,
         displayNote, // Added notes
         tx.debit > 0 ? tx.debit.toFixed(2) : '-',

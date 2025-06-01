@@ -3,6 +3,7 @@
 import React from 'react';
 import { Sale, SaleItem, Customer, HarvestLog, Crop, SeedBatch, PlantingLog } from '@/lib/db';
 import { downloadInvoicePDF } from '@/lib/invoiceGenerator'; // Import the PDF download function
+import { formatDateToDDMMYYYY } from '@/lib/dateUtils'; // Import the date formatting utility
 
 interface EnrichedSale extends Sale {
   customerName?: string;
@@ -107,7 +108,7 @@ export default function SaleList({
         
             return (
               <tr key={sale.id} className="border-b border-gray-200 hover:bg-green-50 transition-colors duration-150">
-                <td className="py-3 px-5">{new Date(sale.sale_date).toLocaleDateString()}</td>
+                <td className="py-3 px-5">{formatDateToDDMMYYYY(sale.sale_date)}</td>
                 <td className="py-3 px-5">{getCustomerName(sale.customer_id)}</td>
                 <td className="py-3 px-5 text-right">{itemCount}</td>
                 <td className="py-3 px-5 text-right">€{totalAmount.toFixed(2)}</td>
