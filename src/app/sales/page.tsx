@@ -5,7 +5,7 @@ import { db, Sale, SaleItem, Customer, Invoice, InputInventory, HarvestLog } fro
 import SaleList from '@/components/SaleList';
 import SaleForm from '@/components/SaleForm';
 import RecordPaymentModal from '@/components/RecordPaymentModal';
-import { downloadInvoicePDF } from '@/lib/invoiceGenerator';
+import { downloadInvoicePDF, openInvoicePDFInNewTab } from '@/lib/invoiceGenerator'; // Added openInvoicePDFInNewTab
 import { exportSalesToCSV, exportSalesToPDF } from '@/lib/reportUtils';
 import { requestPushChanges } from '@/lib/sync';
 
@@ -343,10 +343,11 @@ export default function SalesPage() {
   
   const handleViewInvoice = async (saleId: string) => {
     try {
-        await downloadInvoicePDF(saleId);
+        // Changed to open in new tab instead of downloading
+        await openInvoicePDFInNewTab(saleId);
     } catch (error) {
-        console.error("Failed to download invoice:", error);
-        alert("Failed to generate or download invoice. See console for details.");
+        console.error("Failed to open invoice in new tab:", error);
+        alert("Failed to open invoice. See console for details.");
     }
   };
 

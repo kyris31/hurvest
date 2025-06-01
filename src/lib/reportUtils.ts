@@ -1,8 +1,29 @@
 import { db } from './db';
-import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput } from './db'; // Added Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput
+import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput, Tree } from './db'; // Added Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput, Tree
 import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
 import fontkit from '@pdf-lib/fontkit';
+// Helper function to check for valid date string
+function isValidDateString(dateString: string | null | undefined): boolean {
+  if (!dateString || typeof dateString !== 'string' || dateString.trim().length === 0) {
+    return false;
+  }
+  // Check if the string is in YYYY-MM-DD format, as this is typically what's stored
+  // and what Dexie would expect for string-based date comparisons.
+  // A simple new Date() can be too lenient with various formats.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    // console.warn(`[isValidDateString] Date string "${dateString}" is not in YYYY-MM-DD format.`);
+    return false; // Stricter check: only YYYY-MM-DD is acceptable
+  }
+  const date = new Date(dateString);
+  // Check if the date is valid and the year is reasonable (e.g., not 1970 from an empty or bad string)
+  const isValid = !isNaN(date.getTime());
+  if (isValid && date.getFullYear() < 1990 && dateString !== new Date(0).toISOString().split('T')[0]) { // Avoid epoch date unless it's explicitly that
+      // console.warn(`[isValidDateString] Date string "${dateString}" resulted in an unlikely year: ${date.getFullYear()}`);
+      // return false; // Stricter check for unlikely years
+  }
+  return isValid;
+}
 
 // Extend the Window interface to include showSaveFilePicker for TypeScript
 declare global {
@@ -807,37 +828,103 @@ interface HarvestReportItem {
     lastModified: string;
 }
 
-async function getAllHarvestLogsForReport(filters?: DateRangeFilters): Promise<HarvestReportItem[]> {
-    let harvestLogsQuery = db.harvestLogs.filter(h => h.is_deleted !== 1);
+async function getAllHarvestLogsForReport(filters: DateRangeFilters): Promise<HarvestReportItem[]> {
+  console.log('Fetching harvest log data for report with filters (Full JS filtering strategy):', JSON.stringify(filters));
+  
+  // Step 1: Fetch ALL logs from Dexie, then filter in JS
+  const allLogsFromDB = await db.harvestLogs.toArray();
+  console.log(`[getAllHarvestLogsForReport] Fetched ${allLogsFromDB.length} total harvest logs from DB.`);
 
-    if (filters?.startDate) {
-        const start = new Date(filters.startDate).toISOString().split('T')[0];
-        harvestLogsQuery = harvestLogsQuery.and(h => h.harvest_date >= start);
-    }
-    if (filters?.endDate) {
-        const end = new Date(filters.endDate).toISOString().split('T')[0];
-        harvestLogsQuery = harvestLogsQuery.and(h => h.harvest_date <= end);
-    }
+  // Step 2: Filter for non-deleted and valid date strings in JavaScript
+  let filteredHarvestLogs = allLogsFromDB.filter(h =>
+    h.is_deleted !== 1 &&
+    isValidDateString(h.harvest_date) // isValidDateString strictly checks YYYY-MM-DD
+  );
+  console.log(`[getAllHarvestLogsForReport] ${filteredHarvestLogs.length} logs remaining after is_deleted and isValidDateString JS filters.`);
 
-    const harvestLogs = await harvestLogsQuery.toArray();
-    const plantingLogIds = harvestLogs.map(h => h.planting_log_id);
+  // Step 3: Apply date range filters in JavaScript
+  if (filters.startDate) {
+    try {
+      const startFilterDate = new Date(filters.startDate).toISOString().split('T')[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(startFilterDate)) {
+        filteredHarvestLogs = filteredHarvestLogs.filter(h => h.harvest_date >= startFilterDate);
+      } else {
+        console.warn(`[getAllHarvestLogsForReport] Invalid start date string for JS filter: ${startFilterDate} from input ${filters.startDate}`);
+      }
+    } catch (e) {
+      console.warn(`[getAllHarvestLogsForReport] Error processing start date for JS filter ${filters.startDate}:`, e);
+    }
+  }
+  if (filters.endDate) {
+    try {
+      const endFilterDate = new Date(filters.endDate).toISOString().split('T')[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(endFilterDate)) {
+        filteredHarvestLogs = filteredHarvestLogs.filter(h => h.harvest_date <= endFilterDate);
+      } else {
+        console.warn(`[getAllHarvestLogsForReport] Invalid end date string for JS filter: ${endFilterDate} from input ${filters.endDate}`);
+      }
+    } catch (e) {
+      console.warn(`[getAllHarvestLogsForReport] Error processing end date for JS filter ${filters.endDate}:`, e);
+    }
+  }
+  console.log(`[getAllHarvestLogsForReport] ${filteredHarvestLogs.length} logs remaining after all JS filters.`);
+  
+  // Assign to harvestLogs to match subsequent code
+  const harvestLogs = filteredHarvestLogs;
+  const plantingLogIds = harvestLogs.map(h => h.planting_log_id).filter(id => id != null) as string[]; // Filter out null/undefined and cast
+  const treeIds = harvestLogs.map(h => h.tree_id).filter(id => id != null) as string[]; // Collect tree IDs
+  console.log('[getAllHarvestLogsForReport] Collected treeIds:', JSON.stringify(treeIds));
     
-    const [plantingLogs, seedBatches, cropsData] = await Promise.all([
-        db.plantingLogs.where('id').anyOf(plantingLogIds).and(p => p.is_deleted !== 1).toArray(),
-        db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(), 
-        db.crops.filter(c => c.is_deleted !== 1).toArray() 
+  const [plantingLogs, seedBatches, cropsData, treesData] = await Promise.all([
+      // Ensure plantingLogIds is not empty before querying
+      plantingLogIds.length > 0 ? db.plantingLogs.where('id').anyOf(plantingLogIds).and(p => p.is_deleted !== 1).toArray() : Promise.resolve([]),
+      db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
+      db.crops.filter(c => c.is_deleted !== 1).toArray(),
+      treeIds.length > 0 ? db.trees.where('id').anyOf(treeIds).and(t => t.is_deleted !== 1).toArray() : Promise.resolve([]) // Fetch trees
     ]);
+  console.log('[getAllHarvestLogsForReport] Fetched treesData:', JSON.stringify(treesData));
     
     const reportItems: HarvestReportItem[] = [];
 
     for (const hLog of harvestLogs) {
-        const pLog = plantingLogs.find(pl => pl.id === hLog.planting_log_id);
+        let pLog: PlantingLog | undefined;
         let crop: Crop | undefined;
+        let tree: Tree | undefined;
+        let location: string | undefined = 'N/A';
+        let plantingDate: string | undefined;
+        let cropName: string | undefined = 'N/A';
+        let cropVariety: string | undefined;
+        let cropType: string | undefined;
+        let cropNotes: string | undefined;
 
-        if (pLog && pLog.seed_batch_id) {
-            const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
-            if (sBatch) {
-                crop = cropsData.find(c => c.id === sBatch.crop_id);
+        if (hLog.planting_log_id) {
+            pLog = plantingLogs.find(pl => pl.id === hLog.planting_log_id);
+            if (pLog) {
+                location = pLog.location_description || 'N/A';
+                plantingDate = new Date(pLog.planting_date).toLocaleDateString();
+                if (pLog.seed_batch_id) {
+                    const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
+                    if (sBatch) {
+                        crop = cropsData.find(c => c.id === sBatch.crop_id);
+                        if (crop) {
+                            cropName = crop.name;
+                            cropVariety = crop.variety;
+                            cropType = crop.type;
+                            cropNotes = crop.notes;
+                        }
+                    }
+                }
+            }
+        } else if (hLog.tree_id) {
+            console.log(`[getAllHarvestLogsForReport] Processing harvest log with tree_id: ${hLog.tree_id}`);
+            tree = treesData.find(t => t.id === hLog.tree_id);
+            console.log(`[getAllHarvestLogsForReport] Found tree in treesData:`, JSON.stringify(tree));
+            if (tree) {
+                cropName = tree.identifier || tree.species || 'Tree (Unknown Name/Species)';
+                cropVariety = tree.variety;
+                location = tree.location_description || 'N/A';
+                plantingDate = tree.planting_date ? new Date(tree.planting_date).toLocaleDateString() : undefined;
+                // cropType and cropNotes might not be directly applicable or available for trees in the same way
             }
         }
 
@@ -845,12 +932,12 @@ async function getAllHarvestLogsForReport(filters?: DateRangeFilters): Promise<H
             harvestId: hLog.id,
             harvestDate: new Date(hLog.harvest_date).toLocaleDateString(),
             plantingLogId: hLog.planting_log_id,
-            plantingDate: pLog ? new Date(pLog.planting_date).toLocaleDateString() : undefined,
-            cropName: crop?.name || 'N/A',
-            cropVariety: crop?.variety,
-            cropType: crop?.type,
-            cropNotes: crop?.notes,
-            location: pLog?.location_description || 'N/A',
+            plantingDate: plantingDate,
+            cropName: cropName,
+            cropVariety: cropVariety,
+            cropType: cropType,
+            cropNotes: cropNotes,
+            location: location,
             quantityHarvested: hLog.quantity_harvested,
             quantityUnit: hLog.quantity_unit,
             qualityGrade: hLog.quality_grade,
@@ -898,7 +985,7 @@ function convertHarvestLogsToCSV(data: HarvestReportItem[]): string {
 export async function exportHarvestLogsToCSV(filters?: DateRangeFilters): Promise<void> {
     try {
         console.log("Fetching harvest log data for CSV export with filters:", filters);
-        const harvestReportData = await getAllHarvestLogsForReport(filters);
+        const harvestReportData = await getAllHarvestLogsForReport(filters || {});
         if (harvestReportData.length === 0) {
             alert("No harvest log data available for the selected filters.");
             return;
@@ -1574,7 +1661,7 @@ export async function exportInventoryToPDF(filters?: InventoryReportFilters): Pr
 
 export async function exportHarvestLogsToPDF(filters?: DateRangeFilters): Promise<void> {
     try {
-        const harvestReportData = await getAllHarvestLogsForReport(filters);
+        const harvestReportData = await getAllHarvestLogsForReport(filters || {});
         if (harvestReportData.length === 0) {
             alert("No harvest log data available for PDF report with selected filters.");
             return;
@@ -1608,7 +1695,7 @@ export async function exportHarvestLogsToPDF(filters?: DateRangeFilters): Promis
         
         const tableData = harvestReportData.map(item => [
             item.harvestDate,
-            item.cropName,
+            item.cropName || 'Default if Undefined', // Diagnostic fallback
             item.cropVariety || '',
             item.quantityHarvested,
             item.quantityUnit,

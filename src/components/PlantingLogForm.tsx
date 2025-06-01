@@ -323,7 +323,7 @@ export default function PlantingLogForm({ initialData, onSubmit, onCancel, isSub
     }
 
     try {
-        if (stockUpdatePromise && !initialData) {
+        if (stockUpdatePromise) { // Await if any stock update was queued
             await stockUpdatePromise;
         }
         if (initialData?.id) {

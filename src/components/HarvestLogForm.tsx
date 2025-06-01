@@ -31,24 +31,34 @@ export default function HarvestLogForm({ initialData, onSubmit, onCancel, isSubm
   useEffect(() => {
     const fetchFormData = async () => {
       try {
-        const [plantingLogsData, seedBatchesData, cropsData, seedlingLogsData, inputInventoryData, treesData] = await Promise.all([
-          db.plantingLogs.orderBy('planting_date').filter(pl => pl.is_deleted !== 1 && pl.status !== 'completed' && pl.status !== 'terminated').reverse().toArray(), // Only active planting logs
+        const [plantingLogsData, seedBatchesData, cropsData, seedlingLogsData, inputInventoryData, treesData, purchasedSeedlingsData] = await Promise.all([
+          db.plantingLogs.filter(pl => pl.is_deleted !== 1 && pl.status !== 'completed' && pl.status !== 'terminated').reverse().toArray(), // Only active planting logs, removed orderBy
           db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
           db.crops.filter(c => c.is_deleted !== 1).toArray(),
           db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(),
           db.inputInventory.filter(ii => ii.is_deleted !== 1 && ii.crop_id != null).toArray(),
           db.trees.orderBy('identifier').filter(t => t.is_deleted !== 1).toArray(), // Fetch trees
+          db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1).toArray() // Fetch purchased seedlings
         ]);
+        // console.log('[HarvestLogForm] Fetched plantingLogsData:', JSON.stringify(plantingLogsData)); // Removed
+        // const fraoulaLogInitial = plantingLogsData.find(pl => pl.id === "09cc4d35-c340-4cb3-aa19-3eac9472b924");
+        // console.log('[HarvestLogForm] Fraoula log in initial plantingLogsData:', JSON.stringify(fraoulaLogInitial)); // Removed
+
 
         const cropsMap = new Map(cropsData.map(crop => [crop.id, crop]));
         const seedBatchesMap = new Map(seedBatchesData.map(batch => [batch.id, batch]));
+        const purchasedSeedlingsMap = new Map(purchasedSeedlingsData.map(ps => [ps.id, ps])); // Map for purchased seedlings
 
         const enrichedPlantingLogs = plantingLogsData.map(pl => {
           let finalCrop: Crop | undefined = undefined;
           let finalSeedBatch: SeedBatch | undefined = undefined;
 
-          // ... (existing enrichment logic for planting logs) ...
-          if (pl.input_inventory_id) {
+          if (pl.purchased_seedling_id) {
+            const purchasedSeedling = purchasedSeedlingsMap.get(pl.purchased_seedling_id);
+            if (purchasedSeedling && purchasedSeedling.crop_id) {
+              finalCrop = cropsMap.get(purchasedSeedling.crop_id);
+            }
+          } else if (pl.input_inventory_id) {
             const inventoryItem = inputInventoryData.find(ii => ii.id === pl.input_inventory_id);
             if (inventoryItem && inventoryItem.crop_id) {
               finalCrop = cropsMap.get(inventoryItem.crop_id);
@@ -90,6 +100,7 @@ export default function HarvestLogForm({ initialData, onSubmit, onCancel, isSubm
             if (nameCompare !== 0) return nameCompare;
             return new Date(b.planting_date).getTime() - new Date(a.planting_date).getTime();
         });
+        // Removed duplicate sort and logs
         setAvailablePlantingLogs(enrichedPlantingLogs);
         
         // Sort trees by identifier
@@ -224,18 +235,23 @@ export default function HarvestLogForm({ initialData, onSubmit, onCancel, isSubm
               >
                 <option value="">Select a Planting Log</option>
                 {availablePlantingLogs.map(pl => {
-                  let label = `${new Date(pl.planting_date).toLocaleDateString()} - `;
-                  const crop = pl.cropDetails;
-                  if (crop) {
-                    label += crop.name || 'Unnamed Crop';
-                    if (crop.variety) label += ` ${crop.variety}`;
-                  } else if (pl.seedBatchDetails) {
-                     label += `Unknown Crop (Batch: ${pl.seedBatchDetails.batch_code})`;
-                  } else {
-                     label += 'N/A Crop';
+                  try {
+                    let label = `${new Date(pl.planting_date).toLocaleDateString()} - `;
+                    const crop = pl.cropDetails;
+                    if (crop) {
+                      label += crop.name || 'Unnamed Crop';
+                      if (crop.variety) label += ` ${crop.variety}`;
+                    } else if (pl.seedBatchDetails) {
+                       label += `Unknown Crop (Batch: ${pl.seedBatchDetails.batch_code})`;
+                    } else {
+                       label += 'N/A Crop';
+                    }
+                    label += ` - Loc: ${pl.plot_affected || pl.location_description || 'N/A'}`;
+                    return ( <option key={pl.id} value={pl.id}> {label} </option> );
+                  } catch (e) {
+                    console.error(`[HarvestLogForm] Error rendering option for pl.id ${pl.id}:`, e, JSON.stringify(pl));
+                    return null; // Skip rendering this option if an error occurs
                   }
-                  label += ` - Loc: ${pl.plot_affected || pl.location_description || 'N/A'}`;
-                  return ( <option key={pl.id} value={pl.id}> {label} </option> );
                 })}
               </select>
               {availablePlantingLogs.length === 0 && harvestSourceType === 'plantingLog' && <p className="text-xs text-gray-500 mt-1">No active planting logs available.</p>}

@@ -33,16 +33,22 @@ async function getFullSaleDetails(saleId: string) {
     }
 
     // Pre-fetch all potentially needed related data to avoid N+1 queries in map
-    const plantingLogIds = items.map(item => item.harvest_log_id ? db.harvestLogs.get(item.harvest_log_id).then(hl => hl?.planting_log_id) : Promise.resolve(undefined))
-                                .filter(id => id !== undefined) as Promise<string>[];
-    const resolvedPlantingLogIds = (await Promise.all(plantingLogIds)).filter(id => id) as string[];
-    
-    const relevantPlantingLogs = resolvedPlantingLogIds.length > 0 ? await db.plantingLogs.where('id').anyOf(resolvedPlantingLogIds).and(pl => pl.is_deleted !== 1).toArray() : [];
+    const harvestLogPromises = items.map(item => item.harvest_log_id ? db.harvestLogs.get(item.harvest_log_id) : Promise.resolve(undefined));
+    const resolvedHarvestLogs = (await Promise.all(harvestLogPromises)).filter(hl => hl && hl.is_deleted !== 1) as HarvestLog[];
+
+    const plantingLogIds = resolvedHarvestLogs.map(hl => hl.planting_log_id).filter(id => id) as string[];
+    const treeIdsFromHarvestLogs = resolvedHarvestLogs.map(hl => hl.tree_id).filter(id => id) as string[];
+
+    const relevantPlantingLogs = plantingLogIds.length > 0 ? await db.plantingLogs.where('id').anyOf(plantingLogIds).and(pl => pl.is_deleted !== 1).toArray() : [];
     const plantingLogsMap = new Map(relevantPlantingLogs.map(pl => [pl.id, pl]));
+
+    const relevantTrees = treeIdsFromHarvestLogs.length > 0 ? await db.trees.where('id').anyOf(treeIdsFromHarvestLogs).and(t => t.is_deleted !== 1).toArray() : [];
+    const treesMap = new Map(relevantTrees.map(t => [t.id, t]));
 
     const seedBatchIdsFromPL = relevantPlantingLogs.map(pl => pl.seed_batch_id).filter(id => id) as string[];
     const seedlingLogIdsFromPL = relevantPlantingLogs.map(pl => pl.seedling_production_log_id).filter(id => id) as string[];
     const inventoryIdsFromPL = relevantPlantingLogs.map(pl => pl.input_inventory_id).filter(id => id) as string[];
+    const purchasedSeedlingIdsFromPL = relevantPlantingLogs.map(pl => pl.purchased_seedling_id).filter(id => id) as string[]; // Added for purchased seedlings
 
     const relevantSeedlingLogs = seedlingLogIdsFromPL.length > 0 ? await db.seedlingProductionLogs.where('id').anyOf(seedlingLogIdsFromPL).and(sl => sl.is_deleted !== 1).toArray() : [];
     const seedlingLogsMap = new Map(relevantSeedlingLogs.map(sl => [sl.id, sl]));
@@ -56,16 +62,22 @@ async function getFullSaleDetails(saleId: string) {
     const relevantInventoryItems = inventoryIdsFromPL.length > 0 ? await db.inputInventory.where('id').anyOf(inventoryIdsFromPL).and(ii => ii.is_deleted !== 1).toArray() : [];
     const inventoryItemsMap = new Map(relevantInventoryItems.map(ii => [ii.id, ii]));
 
+    const relevantPurchasedSeedlings = purchasedSeedlingIdsFromPL.length > 0 ? await db.purchasedSeedlings.where('id').anyOf(purchasedSeedlingIdsFromPL).and(ps => ps.is_deleted !== 1).toArray() : [];
+    const purchasedSeedlingsMap = new Map(relevantPurchasedSeedlings.map(ps => [ps.id, ps]));
+
     const cropIds = [
         ...relevantPlantingLogs.map(pl => {
             if (pl.input_inventory_id) return inventoryItemsMap.get(pl.input_inventory_id)?.crop_id;
             if (pl.seedling_production_log_id) return seedlingLogsMap.get(pl.seedling_production_log_id)?.crop_id;
             if (pl.seed_batch_id) return seedBatchesMap.get(pl.seed_batch_id)?.crop_id;
+            if (pl.purchased_seedling_id) return purchasedSeedlingsMap.get(pl.purchased_seedling_id)?.crop_id; // Added for purchased seedlings
             return undefined;
         }),
         ...relevantSeedlingLogs.map(sl => sl.crop_id),
         ...relevantSeedlingLogs.map(sl => sl.seed_batch_id ? seedBatchesMap.get(sl.seed_batch_id)?.crop_id : undefined),
-        ...relevantSeedBatches.map(sb => sb.crop_id)
+        ...relevantSeedBatches.map(sb => sb.crop_id),
+        ...relevantPurchasedSeedlings.map(ps => ps.crop_id) // Added crop_ids from purchased seedlings themselves
+        // Removed: ...relevantTrees.map(t => t.crop_id) as Trees don't have crop_id
     ].filter(id => id) as string[];
     
     const relevantCrops = cropIds.length > 0 ? await db.crops.where('id').anyOf([...new Set(cropIds)]).and(c => c.is_deleted !== 1).toArray() : [];
@@ -78,36 +90,104 @@ async function getFullSaleDetails(saleId: string) {
             const harvestLog = await db.harvestLogs.get(item.harvest_log_id);
             if (harvestLog && harvestLog.is_deleted !== 1) {
                 productDetails = `(Harvested: ${new Date(harvestLog.harvest_date).toLocaleDateString()})`;
-                const plantingLog = plantingLogsMap.get(harvestLog.planting_log_id);
-                
-                if (plantingLog) {
-                    let crop: Crop | undefined;
-                    // ... (existing logic for harvested item name) ...
-                    if (plantingLog.input_inventory_id) {
+                // Prioritize tree_id for product name if available
+                if (harvestLog.tree_id) {
+                    const tree = treesMap.get(harvestLog.tree_id);
+                    if (tree) {
+                        let treeNameParts = [];
+                        if (tree.identifier && tree.identifier.trim() !== '') treeNameParts.push(tree.identifier);
+                        if (tree.species && tree.species.trim() !== '') treeNameParts.push(tree.species);
+                        if (tree.variety && tree.variety.trim() !== '') treeNameParts.push(`(${tree.variety})`);
+                        
+                        if (treeNameParts.length > 0) {
+                            productName = treeNameParts.join(' ');
+                        } else {
+                            productName = 'Unnamed Tree Product';
+                        }
+                    }
+                } else if (harvestLog.planting_log_id) { // Fallback to planting_log_id if no tree_id
+                    const plantingLog = plantingLogsMap.get(harvestLog.planting_log_id);
+                    if (plantingLog) {
+                        let crop: Crop | undefined;
+                        let potentialProductNameFromInv: string | undefined;
+                        let potentialProductNameFromPS: string | undefined;
+
+                        if (plantingLog.input_inventory_id) {
                         const invItem = inventoryItemsMap.get(plantingLog.input_inventory_id);
-                        if (invItem && invItem.crop_id) crop = cropsMap.get(invItem.crop_id);
-                        else if (invItem) productName = invItem.name; // Use inv name if no crop
-                    } else if (plantingLog.seedling_production_log_id) {
-                        const seedlingLog = seedlingLogsMap.get(plantingLog.seedling_production_log_id);
-                        if (seedlingLog) {
-                            if (seedlingLog.crop_id) crop = cropsMap.get(seedlingLog.crop_id);
-                            if (!crop && seedlingLog.seed_batch_id) {
-                                const seedBatch = seedBatchesMap.get(seedlingLog.seed_batch_id);
-                                if (seedBatch && seedBatch.crop_id) crop = cropsMap.get(seedBatch.crop_id);
+                        if (invItem) {
+                            if (invItem.crop_id) {
+                                crop = cropsMap.get(invItem.crop_id);
+                            }
+                            if (invItem.name && invItem.name.trim() !== '') {
+                                potentialProductNameFromInv = invItem.name;
                             }
                         }
-                    } else if (plantingLog.seed_batch_id) {
-                        const seedBatch = seedBatchesMap.get(plantingLog.seed_batch_id);
-                        if (seedBatch && seedBatch.crop_id) crop = cropsMap.get(seedBatch.crop_id);
                     }
-                    if (crop) productName = crop.name || 'Unnamed Crop';
+                    
+                    if (!crop && plantingLog.purchased_seedling_id) { // Check purchased seedling before seedling production log
+                        const psItem = purchasedSeedlingsMap.get(plantingLog.purchased_seedling_id);
+                        if (psItem) {
+                            if (psItem.crop_id) {
+                                crop = cropsMap.get(psItem.crop_id);
+                            }
+                            if (psItem.name && psItem.name.trim() !== '') {
+                                potentialProductNameFromPS = psItem.name;
+                            }
+                        }
+                    }
+                    
+                    if (!crop && plantingLog.seedling_production_log_id) {
+                        const seedlingLog = seedlingLogsMap.get(plantingLog.seedling_production_log_id);
+                        if (seedlingLog) {
+                            if (seedlingLog.crop_id) {
+                                crop = cropsMap.get(seedlingLog.crop_id);
+                            }
+                            // If seedling log itself doesn't have crop_id, try its seed_batch_id
+                            if (!crop && seedlingLog.seed_batch_id) {
+                                const seedBatch = seedBatchesMap.get(seedlingLog.seed_batch_id);
+                                if (seedBatch && seedBatch.crop_id) {
+                                    crop = cropsMap.get(seedBatch.crop_id);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Try to find crop via planting log's direct seed_batch_id only if not found through other means
+                    if (!crop && plantingLog.seed_batch_id) {
+                        const seedBatch = seedBatchesMap.get(plantingLog.seed_batch_id);
+                        if (seedBatch && seedBatch.crop_id) {
+                            crop = cropsMap.get(seedBatch.crop_id);
+                        }
+                    }
+
+                    if (crop) {
+                        if (crop.name && crop.name.trim() !== '') {
+                            productName = crop.name;
+                        } else {
+                            productName = 'Unnamed Crop';
+                        }
+                    } else if (potentialProductNameFromPS) { // Prioritize PS name if no crop
+                        productName = potentialProductNameFromPS;
+                    } else if (potentialProductNameFromInv) { // Then Inv name if no crop and no PS name
+                        productName = potentialProductNameFromInv;
+                    }
+                        // If productName is still 'Unknown Product', it means no crop was found,
+                        // and no relevant PS or Inv name was available.
+                    }
+                } // End of if (plantingLog)
+                
+                // Final fallback for harvested items if no specific name could be derived
+                if (productName === 'Unknown Product') {
+                    productName = 'General Harvested Item';
                 }
-            }
+            } // End of if (harvestLog.tree_id) else if (harvestLog.planting_log_id)
         } else if (item.input_inventory_id) {
             // Fetch the InputInventory item to get its name
             const inventoryItem = await db.inputInventory.get(item.input_inventory_id);
             if (inventoryItem && inventoryItem.is_deleted !== 1) {
-                productName = inventoryItem.name;
+                if (inventoryItem.name && inventoryItem.name.trim() !== '') {
+                    productName = inventoryItem.name;
+                }
                 productDetails = `(Stock ID: ${inventoryItem.id.substring(0,8)}...)`; // Or other relevant detail
             }
         }
@@ -285,6 +365,7 @@ const splitTextToFit = (text: string, maxWidth: number, textFont: PDFFont, textS
     invoiceInfoY = drawText(`Number: ${invoiceRecord.invoice_number}`, headerRightX, invoiceInfoY, { font: boldFont, size: 9 });
     invoiceInfoY = drawText(`Date: ${new Date(invoiceRecord.invoice_date).toLocaleDateString()}`, headerRightX, invoiceInfoY, { size: 9 });
     invoiceInfoY = drawText(`Sale ID: ${sale.id.substring(0,13)}...`, headerRightX, invoiceInfoY, { size: 9 });
+    invoiceInfoY = drawText(`CYBIO 001`, headerRightX, invoiceInfoY, { size: 9 }); // Added CYBIO 001
 
     y = Math.min(companyInfoY, invoiceInfoY) - lineheight * 1.5;
 
@@ -490,6 +571,30 @@ export async function downloadInvoicePDF(saleId: string) {
     }
 }
 
+// Function to generate PDF and open it in a new tab
+export async function openInvoicePDFInNewTab(saleId: string) {
+    try {
+        const pdfBytes = await generateInvoicePDFBytes(saleId);
+        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        const pdfWindow = window.open(url, '_blank');
+        if (pdfWindow) {
+            // Attempt to revoke the object URL after a short delay,
+            // giving the new tab time to load the content.
+            // This is not foolproof but better than not revoking.
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } else {
+            // Fallback if window.open is blocked or fails
+            console.warn("Could not open PDF in new tab, falling back to download.");
+            URL.revokeObjectURL(url); // Revoke immediately if window didn't open
+            await downloadInvoicePDF(saleId); // Trigger download as a fallback
+        }
+    } catch (error) {
+        console.error("Failed to generate or open invoice PDF in new tab:", error);
+        alert(`Error opening invoice: ${error instanceof Error ? error.message : String(error)}`);
+        // Optionally, re-throw or handle more gracefully
+    }
+}
 // The old generateInvoiceHTML can be kept for debugging or removed
 export async function generateInvoiceHTML(saleId: string): Promise<string> {
     const { sale: _sale, items, customer: _customer } = await getFullSaleDetails(saleId); // Prefixed unused sale and customer

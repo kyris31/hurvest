@@ -228,6 +228,14 @@ async function pushChangesToSupabase() {
             delete itemToPush.cropVariety;
             delete itemToPush.seedBatchCode;
           }
+          
+          if (name === 'harvest_logs') {
+            // Remove client-side enriched fields before pushing to Supabase
+            delete itemToPush.plantingLogDetails;
+            delete itemToPush.treeDetails;
+            delete itemToPush.sourceDisplay;
+            delete itemToPush.varietyDisplay;
+          }
 
           // Log current user session before upsert
           const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -256,8 +264,9 @@ async function pushChangesToSupabase() {
           const { error: upsertError } = await supabase.from(name).upsert(itemToPush, { onConflict: 'id' });
           
           if (upsertError) {
+            console.error(`[SyncPush] Direct Supabase upsertError object for ${name} item ${itemToPush.id}:`, upsertError); // Log direct error
             if (name === 'supplier_invoices' || name === 'supplier_invoice_items') {
-              console.error(`[SyncPush] Supabase upsert ERROR for ${name} item ${itemToPush.id}:`, JSON.stringify(upsertError));
+              console.error(`[SyncPush] Supabase upsert ERROR for ${name} item ${itemToPush.id} (JSON):`, JSON.stringify(upsertError));
             }
             throw upsertError;
           }
@@ -273,7 +282,9 @@ async function pushChangesToSupabase() {
         }
       } catch (error: unknown) {
         // Log the raw error object regardless of table, but provide more details if available
-        console.error(`[SyncPush] Error during sync operation for item ${item.id} in ${name}. Raw error:`, error);
+        console.error(`[SyncPush] Error during sync operation for item ${item.id} in ${name}. Raw error object (outer catch):`, error);
+        console.error(`[SyncPush] Stringified Raw error object (outer catch):`, JSON.stringify(error));
+
 
         // Attempt to get more details if it's a Supabase-like error from the upsert
         // The 'error' object here is what was thrown, which should be 'upsertError' if that failed.

@@ -80,12 +80,13 @@ export default function HarvestLogsPage() {
   // For enriching plantingLogDetails if needed by HarvestLogList
   const seedlingProductionLogs = useLiveQuery(async () => db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(), []);
   const inputInventory = useLiveQuery(async () => db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray(), []);
+  const purchasedSeedlings = useLiveQuery(async () => db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1).toArray(), []);
 
 
-  const isLoading = harvestLogs === undefined || plantingLogs === undefined || seedBatches === undefined || crops === undefined || trees === undefined || seedlingProductionLogs === undefined || inputInventory === undefined;
+  const isLoading = harvestLogs === undefined || plantingLogs === undefined || seedBatches === undefined || crops === undefined || trees === undefined || seedlingProductionLogs === undefined || inputInventory === undefined || purchasedSeedlings === undefined;
 
   const enrichedHarvestLogs = React.useMemo(() => {
-    if (!harvestLogs || !plantingLogs || !seedBatches || !crops || !trees || !seedlingProductionLogs || !inputInventory) return [];
+    if (!harvestLogs || !plantingLogs || !seedBatches || !crops || !trees || !seedlingProductionLogs || !inputInventory || !purchasedSeedlings) return [];
 
     const cropsMap = new Map(crops.map(crop => [crop.id, crop]));
     const seedBatchesMap = new Map(seedBatches.map(batch => [batch.id, batch]));
@@ -93,6 +94,7 @@ export default function HarvestLogsPage() {
     const treesMap = new Map(trees.map(t => [t.id, t]));
     const seedlingLogsMap = new Map(seedlingProductionLogs.map(sl => [sl.id, sl]));
     const inputInventoryMap = new Map(inputInventory.map(ii => [ii.id, ii]));
+    const purchasedSeedlingsMap = new Map(purchasedSeedlings.map(ps => [ps.id, ps])); // Create map for purchased seedlings
 
     return harvestLogs.map(hl => {
       let plantingLogDetails: any = null; // Consider defining a proper type
@@ -111,10 +113,18 @@ export default function HarvestLogsPage() {
         if (pl) {
           // Simplified enrichment logic for planting log source - adapt from PlantingLogList/Form if more detail needed
           if (pl.purchased_seedling_id) {
-            const purchasedSeedling = db.purchasedSeedlings.get(pl.purchased_seedling_id); // This is async, not ideal in map
-                                                                                      // For simplicity, assume purchasedSeedlings are pre-fetched if this path is common
-                                                                                      // Or, this enrichment needs to be async or handle promises
-            sourceDisplay = `Purchased Seedling (ID: ${pl.purchased_seedling_id.substring(0,4)})`; // Placeholder
+            const purchasedSeedling = purchasedSeedlingsMap.get(pl.purchased_seedling_id);
+            if (purchasedSeedling) {
+              sourceDisplay = purchasedSeedling.name || `Purchased Seedling (ID: ${pl.purchased_seedling_id.substring(0,4)})`;
+              if (purchasedSeedling.crop_id) {
+                const crop = cropsMap.get(purchasedSeedling.crop_id);
+                varietyDisplay = crop?.variety || '';
+                // If crop.name should also be part of sourceDisplay for consistency:
+                // sourceDisplay = crop ? crop.name : sourceDisplay;
+              }
+            } else {
+              sourceDisplay = `Purchased Seedling (ID: ${pl.purchased_seedling_id.substring(0,4)})`; // Fallback if not found in map
+            }
           } else if (pl.seedling_production_log_id) {
             const sl = seedlingLogsMap.get(pl.seedling_production_log_id);
             if (sl) {
@@ -142,7 +152,7 @@ export default function HarvestLogsPage() {
       }
       return { ...hl, plantingLogDetails, treeDetails, sourceDisplay, varietyDisplay };
     }).sort((a,b) => new Date(b.harvest_date).getTime() - new Date(a.harvest_date).getTime()); // Keep existing sort by harvest_date desc
-  }, [harvestLogs, plantingLogs, seedBatches, crops, trees, seedlingProductionLogs, inputInventory]);
+  }, [harvestLogs, plantingLogs, seedBatches, crops, trees, seedlingProductionLogs, inputInventory, purchasedSeedlings]);
 
 
   const handleFormSubmit = async (data: Omit<HarvestLog, 'id' | '_synced' | '_last_modified' | 'created_at' | 'updated_at'> | HarvestLog) => {

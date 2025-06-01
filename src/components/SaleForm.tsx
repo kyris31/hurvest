@@ -47,7 +47,7 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
 
   const fetchFormData = useCallback(async () => {
     try {
-      const [customers, harvests, plantingLogs, seedBatches, crops, seedlingLogs, allInputInventory] = await Promise.all([
+      const [customers, harvests, plantingLogs, seedBatches, crops, seedlingLogs, allInputInventory, trees, purchasedSeedlings] = await Promise.all([
         db.customers.orderBy('name').filter(c => c.is_deleted !==1).toArray(),
         db.harvestLogs.orderBy('harvest_date').filter(h => h.is_deleted !== 1 && (h.current_quantity_available ?? h.quantity_harvested) > 0).reverse().toArray(),
         db.plantingLogs.filter(p => p.is_deleted !== 1).toArray(),
@@ -55,31 +55,65 @@ export default function SaleForm({ initialData, onSubmit, onCancel, isSubmitting
         db.crops.filter(c => c.is_deleted !== 1).toArray(),
         db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(),
         db.inputInventory.filter(ii => ii.is_deleted !== 1 && (ii.current_quantity ?? 0) > 0).toArray(),
+        db.trees.filter(t => t.is_deleted !== 1).toArray(), // Fetch trees
+        db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1).toArray(), // Fetch purchased seedlings
       ]);
       setAvailableCustomers(customers);
       
       const cropsMap = new Map(crops.map(c => [c.id, c]));
+      const treesMap = new Map(trees.map(t => [t.id, t])); // Create map for trees
+      const purchasedSeedlingsMap = new Map(purchasedSeedlings.map(ps => [ps.id, ps])); // Create map for purchased seedlings
       const products: SellableProduct[] = [];
 
       harvests.forEach(h => {
-        const pLog = plantingLogs.find(pl => pl.id === h.planting_log_id);
         let cropName = 'Unknown Harvested Crop';
-        if (pLog) {
-          if (pLog.input_inventory_id) { 
-            const invItem = allInputInventory.find(ii => ii.id === pLog.input_inventory_id);
-            if (invItem && invItem.crop_id) cropName = cropsMap.get(invItem.crop_id)?.name || invItem.name || cropName;
-            else if (invItem) cropName = invItem.name || cropName;
-          } else if (pLog.seedling_production_log_id) {
-            const sLog = seedlingLogs.find(sl => sl.id === pLog.seedling_production_log_id);
-            if (sLog && sLog.crop_id) cropName = cropsMap.get(sLog.crop_id)?.name || cropName;
-          } else if (pLog.seed_batch_id) {
-            const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
-            if (sBatch && sBatch.crop_id) cropName = cropsMap.get(sBatch.crop_id)?.name || cropName;
+        let varietyName: string | undefined = undefined;
+
+        if (h.tree_id) {
+          const tree = treesMap.get(h.tree_id);
+          if (tree) {
+            cropName = tree.identifier || tree.species || 'Unknown Tree';
+            varietyName = tree.variety;
+          }
+        } else if (h.planting_log_id) {
+          const pLog = plantingLogs.find(pl => pl.id === h.planting_log_id);
+          if (pLog) {
+            let tempCrop: { name?: string, variety?: string } | undefined;
+            if (pLog.purchased_seedling_id) {
+              const ps = purchasedSeedlingsMap.get(pLog.purchased_seedling_id);
+              if (ps && ps.crop_id) {
+                tempCrop = cropsMap.get(ps.crop_id);
+              }
+              cropName = tempCrop?.name || ps?.name || cropName; // Prioritize linked crop name, then purchased seedling name
+              varietyName = tempCrop?.variety;
+            } else if (pLog.input_inventory_id) {
+              const invItem = allInputInventory.find(ii => ii.id === pLog.input_inventory_id);
+              if (invItem && invItem.crop_id) tempCrop = cropsMap.get(invItem.crop_id);
+              cropName = tempCrop?.name || invItem?.name || cropName;
+              varietyName = tempCrop?.variety;
+            } else if (pLog.seedling_production_log_id) {
+              const sLog = seedlingLogs.find(sl => sl.id === pLog.seedling_production_log_id);
+              if (sLog && sLog.crop_id) tempCrop = cropsMap.get(sLog.crop_id);
+              cropName = tempCrop?.name || cropName;
+              varietyName = tempCrop?.variety;
+            } else if (pLog.seed_batch_id) {
+              const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
+              if (sBatch && sBatch.crop_id) tempCrop = cropsMap.get(sBatch.crop_id);
+              cropName = tempCrop?.name || cropName;
+              varietyName = tempCrop?.variety;
+            }
           }
         }
+        
+        let displayName = cropName;
+        if (varietyName) {
+          displayName += ` - ${varietyName}`;
+        }
+        displayName += ` (Harvested: ${new Date(h.harvest_date).toLocaleDateString()})`;
+
         products.push({
           id: h.id,
-          displayName: `${cropName} (Harvested: ${new Date(h.harvest_date).toLocaleDateString()})`,
+          displayName: displayName,
           availableQuantity: h.current_quantity_available !== undefined ? h.current_quantity_available : h.quantity_harvested,
           quantityUnit: h.quantity_unit,
           sourceType: 'harvest',
