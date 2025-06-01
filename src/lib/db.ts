@@ -1412,7 +1412,7 @@ export class HurvesthubDB extends Dexie {
       cropPlanStages: 'id, crop_plan_id, stage_type, status, planned_start_date, _last_modified, _synced, is_deleted',
       cropPlanTasks: 'id, crop_plan_stage_id, status, planned_due_date, assigned_to_user_id, _last_modified, _synced, is_deleted',
       plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, crop_plan_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted',
-      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, _last_modified, _synced, is_deleted',
+      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, [supplier_id+invoice_number], _last_modified, _synced, is_deleted',
       supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
       inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
       seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
