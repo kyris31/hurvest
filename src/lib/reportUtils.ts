@@ -1,5 +1,5 @@
 import { db } from './db';
-import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput, Tree } from './db'; // Added Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput, Tree
+import type { Sale, SaleItem, Customer, HarvestLog, PlantingLog, Crop, SeedBatch, Invoice, InputInventory, Supplier, Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput, Tree, GeneralExpense } from './db'; // Added Flock, FeedLog, FlockRecord, PurchasedSeedling, SeedlingProductionLog, CultivationActivityPlantingLink, CultivationActivityUsedInput, Tree, GeneralExpense
 import { formatDateToDDMMYYYY } from './dateUtils'; // Import the date formatting utility
 import { saveAs } from 'file-saver';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, RGB } from 'pdf-lib';
@@ -954,58 +954,126 @@ async function getAllHarvestLogsForReport(filters: DateRangeFilters): Promise<Ha
   const treeIds = harvestLogs.map(h => h.tree_id).filter(id => id != null) as string[]; // Collect tree IDs
   console.log('[getAllHarvestLogsForReport] Collected treeIds:', JSON.stringify(treeIds));
     
-  const [plantingLogs, seedBatches, cropsData, treesData] = await Promise.all([
-      // Ensure plantingLogIds is not empty before querying
+  const [
+    plantingLogs,
+    seedBatches,
+    cropsData,
+    treesData,
+    seedlingProductionLogs,
+    inputInventory,
+    purchasedSeedlings
+  ] = await Promise.all([
       plantingLogIds.length > 0 ? db.plantingLogs.where('id').anyOf(plantingLogIds).and(p => p.is_deleted !== 1).toArray() : Promise.resolve([]),
       db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray(),
       db.crops.filter(c => c.is_deleted !== 1).toArray(),
-      treeIds.length > 0 ? db.trees.where('id').anyOf(treeIds).and(t => t.is_deleted !== 1).toArray() : Promise.resolve([]) // Fetch trees
+      treeIds.length > 0 ? db.trees.where('id').anyOf(treeIds).and(t => t.is_deleted !== 1).toArray() : Promise.resolve([]),
+      db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray(),
+      db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray(),
+      db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1).toArray()
     ]);
   console.log('[getAllHarvestLogsForReport] Fetched treesData:', JSON.stringify(treesData));
+  console.log('[getAllHarvestLogsForReport] Fetched seedlingProductionLogs:', seedlingProductionLogs.length);
+  console.log('[getAllHarvestLogsForReport] Fetched inputInventory:', inputInventory.length);
+  console.log('[getAllHarvestLogsForReport] Fetched purchasedSeedlings:', purchasedSeedlings.length);
+
+    const cropsMap = new Map(cropsData.map(crop => [crop.id, crop]));
+    const seedBatchesMap = new Map(seedBatches.map(batch => [batch.id, batch]));
+    const plantingLogsMap = new Map(plantingLogs.map(pl => [pl.id, pl]));
+    const treesMap = new Map(treesData.map(t => [t.id, t]));
+    const seedlingLogsMap = new Map(seedlingProductionLogs.map(sl => [sl.id, sl]));
+    const inputInventoryMap = new Map(inputInventory.map(ii => [ii.id, ii]));
+    const purchasedSeedlingsMap = new Map(purchasedSeedlings.map(ps => [ps.id, ps]));
     
     const reportItems: HarvestReportItem[] = [];
 
     for (const hLog of harvestLogs) {
         let pLog: PlantingLog | undefined;
-        let crop: Crop | undefined;
+        let crop: Crop | undefined; // Will be determined by the new logic
         let tree: Tree | undefined;
         let location: string | undefined = 'N/A';
         let plantingDate: string | undefined;
-        let cropName: string | undefined = 'N/A';
+        let cropName: string | undefined; // Initialize as undefined
         let cropVariety: string | undefined;
         let cropType: string | undefined;
         let cropNotes: string | undefined;
 
-        if (hLog.planting_log_id) {
-            pLog = plantingLogs.find(pl => pl.id === hLog.planting_log_id);
+        if (hLog.tree_id) {
+            tree = treesMap.get(hLog.tree_id);
+            if (tree) {
+                cropName = tree.identifier || tree.species || 'Unknown Tree';
+                cropVariety = tree.variety || '';
+                location = tree.location_description || 'N/A';
+                plantingDate = tree.planting_date ? formatDateToDDMMYYYY(tree.planting_date) : undefined;
+                // cropType and cropNotes might not be directly applicable for trees here
+            }
+            // No 'else' here for tree not found, as cropName would remain undefined or its previous value.
+        } else if (hLog.planting_log_id) {
+            pLog = plantingLogsMap.get(hLog.planting_log_id);
             if (pLog) {
                 location = pLog.location_description || 'N/A';
                 plantingDate = formatDateToDDMMYYYY(pLog.planting_date);
-                if (pLog.seed_batch_id) {
-                    const sBatch = seedBatches.find(sb => sb.id === pLog.seed_batch_id);
-                    if (sBatch) {
-                        crop = cropsData.find(c => c.id === sBatch.crop_id);
+
+                if (pLog.purchased_seedling_id) {
+                    const purchasedSeedling = purchasedSeedlingsMap.get(pLog.purchased_seedling_id);
+                    if (purchasedSeedling) {
+                        cropName = purchasedSeedling.name || `Purchased Seedling (ID: ${pLog.purchased_seedling_id.substring(0,4)})`;
+                        if (purchasedSeedling.crop_id) {
+                            crop = cropsMap.get(purchasedSeedling.crop_id);
+                            if (crop) {
+                                cropVariety = crop.variety || '';
+                                cropType = crop.type;
+                                cropNotes = crop.notes;
+                            }
+                        }
+                    } else {
+                        cropName = `Purchased Seedling (ID: ${pLog.purchased_seedling_id.substring(0,4)})`;
+                    }
+                } else if (pLog.seedling_production_log_id) {
+                    const sl = seedlingLogsMap.get(pLog.seedling_production_log_id);
+                    if (sl) {
+                        crop = sl.crop_id ? cropsMap.get(sl.crop_id) : undefined;
                         if (crop) {
                             cropName = crop.name;
-                            cropVariety = crop.variety;
+                            cropVariety = crop.variety || '';
                             cropType = crop.type;
                             cropNotes = crop.notes;
+                        } else {
+                            cropName = `Self-Prod. (Log: ${sl.id.substring(0,4)})`;
+                        }
+                    }
+                } else if (pLog.seed_batch_id) {
+                    const sb = seedBatchesMap.get(pLog.seed_batch_id);
+                    if (sb) {
+                        crop = sb.crop_id ? cropsMap.get(sb.crop_id) : undefined;
+                        if (crop) {
+                            cropName = crop.name;
+                            cropVariety = crop.variety || '';
+                            cropType = crop.type;
+                            cropNotes = crop.notes;
+                        } else {
+                             cropName = `Seed Batch (Code: ${sb.batch_code})`;
+                        }
+                    }
+                } else if (pLog.input_inventory_id) {
+                    const invItem = inputInventoryMap.get(pLog.input_inventory_id);
+                    if (invItem) {
+                        crop = invItem.crop_id ? cropsMap.get(invItem.crop_id) : undefined;
+                        if (crop) {
+                            cropName = crop.name;
+                            cropVariety = crop.variety || '';
+                            cropType = crop.type;
+                            cropNotes = crop.notes;
+                        } else {
+                            cropName = invItem.name; // Use item name if no specific crop link
                         }
                     }
                 }
             }
-        } else if (hLog.tree_id) {
-            console.log(`[getAllHarvestLogsForReport] Processing harvest log with tree_id: ${hLog.tree_id}`);
-            tree = treesData.find(t => t.id === hLog.tree_id);
-            console.log(`[getAllHarvestLogsForReport] Found tree in treesData:`, JSON.stringify(tree));
-            if (tree) {
-                cropName = tree.identifier || tree.species || 'Tree (Unknown Name/Species)';
-                cropVariety = tree.variety;
-                location = tree.location_description || 'N/A';
-                plantingDate = tree.planting_date ? formatDateToDDMMYYYY(tree.planting_date) : undefined;
-                // cropType and cropNotes might not be directly applicable or available for trees in the same way
-            }
         }
+        // Removed the 'else' block that set cropName to DIAGNOSTIC_NO_IDS_FOR_HL_...
+        // Removed specific diagnostic for empty string or undefined,
+        // as the PDF generation handles undefined cropName with 'N/A'.
+        // The core issue is data-related if cropName isn't determined.
 
         reportItems.push({
             harvestId: hLog.id,
@@ -1248,16 +1316,25 @@ export async function exportInventoryValueToPDF(filters?: InventoryReportFilters
         }
 
         const pdfDoc = await PDFDocument.create();
-        pdfDoc.registerFontkit(fontkit);
+        await pdfDoc.registerFontkit(fontkit); // Moved up
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+        
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         
@@ -1567,16 +1644,25 @@ export async function exportSalesToPDF(filters?: DateRangeFilters): Promise<void
         }
 
         const pdfDoc = await PDFDocument.create();
-        pdfDoc.registerFontkit(fontkit);
+        await pdfDoc.registerFontkit(fontkit); // Moved up
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         
@@ -1662,16 +1748,25 @@ export async function exportInventoryToPDF(filters?: InventoryReportFilters): Pr
         }
 
         const pdfDoc = await PDFDocument.create();
-        pdfDoc.registerFontkit(fontkit);
+        await pdfDoc.registerFontkit(fontkit); // Moved up
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+        
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         
@@ -1746,16 +1841,25 @@ export async function exportHarvestLogsToPDF(filters?: DateRangeFilters): Promis
             return;
         }
         const pdfDoc = await PDFDocument.create();
-        pdfDoc.registerFontkit(fontkit);
+        await pdfDoc.registerFontkit(fontkit); // Moved up
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         
@@ -1950,16 +2054,25 @@ export async function exportSeedlingLifecycleToPDF(filters?: DateRangeFilters): 
             return;
         }
         const pdfDoc = await PDFDocument.create();
-        pdfDoc.registerFontkit(fontkit);
+        await pdfDoc.registerFontkit(fontkit); // Moved up
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+        
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         // Call the common header function first
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
@@ -2193,16 +2306,25 @@ export async function exportOrganicComplianceToPDF(filters?: DateRangeFilters): 
             return;
         }
         const pdfDoc = await PDFDocument.create();
-        pdfDoc.registerFontkit(fontkit);
+        await pdfDoc.registerFontkit(fontkit); // Moved up
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         
@@ -2381,15 +2503,26 @@ export async function exportInputItemUsageLedgerToPDF(filters?: { itemId?: strin
 
     const item = ledgerData[0];
     const pdfDoc = await PDFDocument.create();
+    // Register fontkit before fetching/embedding fonts
+    await pdfDoc.registerFontkit(fontkit);
+
+    const fetchFont = async (url: string) => {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+      }
+      return response.arrayBuffer();
+    };
+
+    const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+    const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+    const mainFont = await pdfDoc.embedFont(fontBytes);
+    const boldFont = await pdfDoc.embedFont(boldFontBytes);
+    
     let page = pdfDoc.addPage();
     const { width: pageWidth, height: pageHeight } = page.getSize();
     const margin = 30;
     let yPos = pageHeight - margin;
-
-    const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-    const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-    const mainFont = await pdfDoc.embedFont(fontBytes);
-    const boldFont = await pdfDoc.embedFont(boldFontBytes);
 
     const drawTextLine = (text: string, currentY: number, size: number, font: PDFFont = mainFont, xOffset: number = 0) => {
         page.drawText(text, { x: margin + xOffset, y: currentY, font, size, color: rgb(0,0,0) });
@@ -2556,15 +2689,25 @@ export async function exportGroupedInventorySummaryToPDF(): Promise<void> {
             return;
         }
         const pdfDoc = await PDFDocument.create();
+        await pdfDoc.registerFontkit(fontkit);
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         
@@ -2766,15 +2909,25 @@ export async function exportDetailedInputUsageToPDF(filters?: DateRangeFilters):
             return;
         }
         const pdfDoc = await PDFDocument.create();
+        await pdfDoc.registerFontkit(fontkit);
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+        
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 40;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         
@@ -2892,15 +3045,25 @@ export async function exportSeedSourceDeclarationToPDF(filters?: DateRangeFilter
         if (reportData.length === 0) { alert("No data for Seed Source Declaration PDF."); return; }
         
         const pdfDoc = await PDFDocument.create();
+        await pdfDoc.registerFontkit(fontkit);
+
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        const customFont = await pdfDoc.embedFont(fontBytes);
+        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
+
         let page = pdfDoc.addPage();
         const { height } = page.getSize();
         const margin = 30;
         const yPos = { y: height - margin };
-
-        const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-        const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-        const customFont = await pdfDoc.embedFont(fontBytes);
-        const customBoldFont = await pdfDoc.embedFont(boldFontBytes);
 
         await addPdfHeader(pdfDoc, page, yPos, customFont, customBoldFont);
         yPos.y -= 5;
@@ -3248,22 +3411,31 @@ export async function exportPlantingLogsToPDF(filters?: DateRangeFilters): Promi
         }
 
         const pdfDoc = await PDFDocument.create();
-        pdfDoc.registerFontkit(fontkit);
-        let page = pdfDoc.addPage([612, 792]); // Standard US Letter
+        await pdfDoc.registerFontkit(fontkit); // Moved up
 
+        const fetchFont = async (url: string) => {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+          }
+          return response.arrayBuffer();
+        };
+        
         let mainFont: PDFFont;
         let boldFont: PDFFont;
         try {
-            const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-            const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
+            const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+            const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
             mainFont = await pdfDoc.embedFont(fontBytes);
             boldFont = await pdfDoc.embedFont(boldFontBytes);
         } catch (e) {
             console.error("Error embedding NotoSans font for Planting Logs PDF, falling back to Helvetica.", e);
+            // Fallback to Helvetica if NotoSans fails (as it was doing)
             mainFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
             boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
         }
-
+        
+        let page = pdfDoc.addPage([612, 792]); // Standard US Letter
         const { width, height } = page.getSize();
         const marginProperty = 40; // Renamed to avoid conflict
         const yPos = { y: height - marginProperty };
@@ -3484,21 +3656,30 @@ export async function exportStatementOfAccountToPDF(filters: StatementOfAccountF
     }
 
     const pdfDoc = await PDFDocument.create();
-    pdfDoc.registerFontkit(fontkit);
-    let page = pdfDoc.addPage([612, 792]); 
+    await pdfDoc.registerFontkit(fontkit); // Moved up
+
+    const fetchFont = async (url: string) => {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+      }
+      return response.arrayBuffer();
+    };
 
     let mainFont: PDFFont;
     let boldFont: PDFFont;
     try {
-      const fontBytes = await fetch('/fonts/static/NotoSans-Regular.ttf').then(res => res.arrayBuffer());
-      const boldFontBytes = await fetch('/fonts/static/NotoSans-Bold.ttf').then(res => res.arrayBuffer());
-      mainFont = await pdfDoc.embedFont(fontBytes);
-      boldFont = await pdfDoc.embedFont(boldFontBytes);
+        const fontBytes = await fetchFont('/fonts/static/NotoSans-Regular.ttf');
+        const boldFontBytes = await fetchFont('/fonts/static/NotoSans-Bold.ttf');
+        mainFont = await pdfDoc.embedFont(fontBytes);
+        boldFont = await pdfDoc.embedFont(boldFontBytes);
     } catch (e) {
-      console.error("Error embedding NotoSans font for Statement, falling back to Helvetica.", e);
-      mainFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-      boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        console.error("Error embedding NotoSans font for Statement, falling back to Helvetica.", e);
+        mainFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+        boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
     }
+    
+    let page = pdfDoc.addPage([612, 792]);
 
     const { width, height } = page.getSize();
     const margin = 40;
@@ -3640,14 +3821,668 @@ export async function exportStatementOfAccountToPDF(filters: StatementOfAccountF
       } catch (err: any) {
         if (err.name !== 'AbortError') {
           console.error("Error saving Statement PDF with File System Access API:", err);
-          saveAs(blob, fileName); 
+          try {
+            saveAs(blob, fileName);
+          } catch (saveAsErr) {
+            console.error('Error during saveAs fallback for Statement PDF:', saveAsErr);
+            alert('Failed to save Statement PDF using fallback. Check console.');
+          }
         }
       }
     } else {
-      saveAs(blob, fileName);
+      try {
+        saveAs(blob, fileName);
+      } catch (saveAsErr) {
+        console.error('Error during saveAs for Statement PDF:', saveAsErr);
+        alert('Failed to save Statement PDF. Check console.');
+      }
     }
   } catch (error) { // Catch for the main try block
     console.error("Error exporting Statement of Account to PDF:", error);
     alert("Failed to export Statement of Account. See console for details.");
+  }
+}
+// --- General Expenses Report ---
+
+// Interface for the report items
+export interface GeneralExpenseReportItem {
+  id: string;
+  serviceType: string;
+  category?: string;
+  provider?: string;
+  billDate: string; // DD/MM/YYYY
+  dueDate: string; // DD/MM/YYYY
+  amount: number;
+  paymentStatus: string;
+  paymentDate?: string; // DD/MM/YYYY
+  paymentAmount?: number;
+  referenceNumber?: string;
+  notes?: string;
+  lastModified: string;
+}
+
+// Interface for filtering general expense reports
+export interface GeneralExpenseReportFilters extends DateRangeFilters {
+  serviceType?: 'WATER' | 'ELECTRICITY' | 'TELEPHONE' | 'FIELD_TAXES' | 'INTERNET' | 'VEHICLE_MAINTENANCE' | 'OTHER' | 'ALL';
+  category?: string;
+  paymentStatus?: 'UNPAID' | 'PAID' | 'PARTIALLY_PAID' | 'ALL';
+}
+
+// Function to fetch all general expenses for reporting
+export async function getAllGeneralExpensesForReport(
+  filters: GeneralExpenseReportFilters
+): Promise<GeneralExpenseReportItem[]> {
+  console.log('Fetching general expenses for report with filters:', JSON.stringify(filters));
+  let query = db.general_expenses.filter(exp => exp.is_deleted !== 1);
+
+  // Date range filtering (using bill_date)
+  if (filters.startDate) {
+    const start = new Date(filters.startDate).toISOString().split('T')[0];
+    query = query.and(exp => exp.bill_date >= start);
+  }
+  if (filters.endDate) {
+    const end = new Date(filters.endDate).toISOString().split('T')[0];
+    query = query.and(exp => exp.bill_date <= end);
+  }
+
+  // Service Type filtering
+  if (filters.serviceType && filters.serviceType !== 'ALL') {
+    query = query.and(exp => exp.service_type === filters.serviceType);
+  }
+
+  // Category filtering
+  if (filters.category && filters.category.trim() !== '') {
+    const categoryLower = filters.category.toLowerCase();
+    // Ensure exp.category is treated as a string before calling toLowerCase
+    query = query.and(exp => !!exp.category && exp.category.toLowerCase().includes(categoryLower));
+  }
+  
+  // Payment Status filtering
+  if (filters.paymentStatus && filters.paymentStatus !== 'ALL') {
+     query = query.and(exp => exp.payment_status === filters.paymentStatus);
+  }
+
+  const expenses = await query.toArray();
+
+  return expenses.map(exp => ({
+    id: exp.id,
+    serviceType: exp.service_type.replace(/_/g, ' '),
+    category: exp.category || 'N/A',
+    provider: exp.provider || 'N/A',
+    billDate: formatDateToDDMMYYYY(exp.bill_date),
+    dueDate: formatDateToDDMMYYYY(exp.due_date),
+    amount: exp.amount,
+    paymentStatus: exp.payment_status.replace(/_/g, ' '),
+    paymentDate: exp.payment_date ? formatDateToDDMMYYYY(exp.payment_date) : 'N/A',
+    paymentAmount: exp.payment_amount === undefined || exp.payment_amount === null ? undefined : exp.payment_amount,
+    referenceNumber: exp.reference_number || 'N/A',
+    notes: exp.notes || '',
+    lastModified: exp._last_modified ? new Date(exp._last_modified).toLocaleString() : (exp.updated_at ? new Date(exp.updated_at).toLocaleString() : '')
+  })).sort((a, b) => {
+    // Convert DD/MM/YYYY to YYYY-MM-DD for correct date sorting
+    const dateA = new Date(a.billDate.split('/').reverse().join('-')).getTime();
+    const dateB = new Date(b.billDate.split('/').reverse().join('-')).getTime();
+    return dateB - dateA; // Sort by bill date descending
+  });
+}
+// Function to convert general expenses data to CSV format
+function convertGeneralExpensesToCSV(data: GeneralExpenseReportItem[]): string {
+  if (data.length === 0) return '';
+  const headers = [
+    "ID", "Service Type", "Category", "Provider", "Bill Date", "Due Date", 
+    "Amount", "Payment Status", "Payment Date", "Payment Amount", 
+    "Reference Number", "Notes", "Last Modified"
+  ];
+  const csvRows = [headers.join(',')];
+
+  data.forEach(item => {
+    const row = [
+      `"${item.id}"`,
+      `"${item.serviceType}"`,
+      `"${item.category || ''}"`,
+      `"${item.provider || ''}"`,
+      `"${item.billDate}"`,
+      `"${item.dueDate}"`,
+      item.amount,
+      `"${item.paymentStatus}"`,
+      `"${item.paymentDate || ''}"`,
+      item.paymentAmount === undefined || item.paymentAmount === null ? '' : item.paymentAmount,
+      `"${item.referenceNumber || ''}"`,
+      `"${(item.notes || '').replace(/"/g, '""')}"`, // Escape double quotes in notes
+      `"${item.lastModified}"`
+    ];
+    csvRows.push(row.join(','));
+  });
+  return csvRows.join('\\n');
+}
+
+// Function to trigger CSV download for general expenses
+export async function exportGeneralExpensesToCSV(filters: GeneralExpenseReportFilters): Promise<void> {
+  try {
+    console.log("Fetching general expense data for CSV export with filters:", filters);
+    const reportData = await getAllGeneralExpensesForReport(filters);
+    if (reportData.length === 0) {
+      alert("No general expense data available for the selected filters.");
+      return;
+    }
+    console.log(`Fetched ${reportData.length} general expenses for CSV report.`);
+    
+    const csvData = convertGeneralExpensesToCSV(reportData);
+    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    
+    const now = new Date();
+    const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const suggestedName = `reports/Hurvesthub_GeneralExpenses_Report_${dateStamp}.csv`;
+    
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: suggestedName,
+          types: [{ description: 'CSV files', accept: { 'text/csv': ['.csv'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        console.log('General expenses CSV file saved successfully using File System Access API.');
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.log('File save aborted by user.');
+        } else {
+          console.error('Error saving file with File System Access API, falling back to saveAs:', err);
+          saveAs(blob, suggestedName);
+        }
+      }
+    } else {
+      saveAs(blob, suggestedName);
+      console.log('General expenses CSV file saved using saveAs fallback.');
+    }
+  } catch (error) {
+    console.error('Error exporting general expenses to CSV:', error);
+    alert('Failed to export general expenses to CSV. Check console for details.');
+  }
+}
+
+// Function to trigger PDF download for general expenses
+export async function exportGeneralExpensesToPDF(filters: GeneralExpenseReportFilters): Promise<void> {
+  try {
+    console.log("Fetching general expense data for PDF export with filters:", filters);
+    const reportData = await getAllGeneralExpensesForReport(filters);
+
+    if (reportData.length === 0) {
+      alert("No general expense data available for the selected filters.");
+      return;
+    }
+    console.log(`Fetched ${reportData.length} general expenses for PDF report.`);
+
+    const pdfDoc = await PDFDocument.create();
+    await pdfDoc.registerFontkit(fontkit);
+
+    const fetchFont = async (url: string) => {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+      }
+      return response.arrayBuffer();
+    };
+
+    const fontBytes = await fetchFont("/fonts/static/NotoSans-Regular.ttf");
+    const boldFontBytes = await fetchFont("/fonts/static/NotoSans-Bold.ttf");
+    const mainFont = await pdfDoc.embedFont(fontBytes);
+    const boldFont = await pdfDoc.embedFont(boldFontBytes);
+    
+    let page = pdfDoc.addPage();
+    let yPos = { y: page.getHeight() - 50 };
+
+    await addPdfHeader(pdfDoc, page, yPos, mainFont, boldFont);
+    
+    page.drawText('General Expenses Report', {
+      x: 50,
+      y: yPos.y,
+      size: 18,
+      font: boldFont,
+      color: rgb(0.1, 0.1, 0.1),
+    });
+    yPos.y -= 25;
+
+    const filterDescriptions = [
+      filters.startDate && `From: ${formatDateToDDMMYYYY(filters.startDate)}`,
+      filters.endDate && `To: ${formatDateToDDMMYYYY(filters.endDate)}`,
+      filters.serviceType && filters.serviceType !== 'ALL' && `Service: ${filters.serviceType.replace(/_/g, ' ')}`,
+      filters.category && `Category: ${filters.category}`,
+      filters.paymentStatus && filters.paymentStatus !== 'ALL' && `Status: ${filters.paymentStatus.replace(/_/g, ' ')}`,
+    ].filter(Boolean).join(' | ');
+
+    if (filterDescriptions) {
+        page.drawText(`Filters: ${filterDescriptions}`, {
+            x: 50,
+            y: yPos.y,
+            size: 9,
+            font: mainFont,
+            color: rgb(0.3, 0.3, 0.3),
+        });
+        yPos.y -= 15;
+    }
+    
+    const tableHeaders = ["Bill Date", "Service", "Category", "Provider", "Amount (€)", "Due Date", "Status", "Paid Date", "Paid Amt (€)"];
+    const columnWidths = [55, 60, 55, 60, 60, 55, 50, 55, 50]; // Adjusted for Amount/Due Date header
+
+    const tableData = reportData.map(item => [
+      item.billDate,
+      item.serviceType,
+      item.category || 'N/A',
+      item.provider || 'N/A',
+      item.amount.toFixed(2),
+      item.dueDate,
+      item.paymentStatus,
+      item.paymentDate || 'N/A',
+      item.paymentAmount === undefined || item.paymentAmount === null ? 'N/A' : item.paymentAmount.toFixed(2)
+    ]);
+
+    page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { font: mainFont, boldFont: boldFont, fontSize: 8, headerFontSize: 10 });
+
+    const pdfBytes = await pdfDoc.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+
+    const now = new Date();
+    const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const suggestedName = `reports/Hurvesthub_GeneralExpenses_Report_${dateStamp}.pdf`;
+
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName: suggestedName,
+          types: [{ description: 'PDF files', accept: { 'application/pdf': ['.pdf'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        console.log('General expenses PDF file saved successfully using File System Access API.');
+      } catch (err: any) {
+        if (err.name === 'AbortError') {
+          console.log('File save aborted by user.');
+        } else {
+          console.error('Error saving PDF file with File System Access API, falling back to saveAs:', err);
+          try {
+            saveAs(blob, suggestedName);
+          } catch (saveAsErr) {
+            console.error('Error during saveAs fallback for PDF:', saveAsErr);
+            alert('Failed to save PDF using fallback. Check console.');
+          }
+        }
+      }
+    } else {
+      try {
+        saveAs(blob, suggestedName);
+        console.log('General expenses PDF file saved using saveAs fallback.');
+      } catch (saveAsErr) {
+        console.error('Error during saveAs for PDF:', saveAsErr);
+        alert('Failed to save PDF. Check console.');
+      }
+    }
+
+  } catch (error) {
+    console.error('Error exporting general expenses to PDF:', error);
+    alert('Failed to export general expenses to PDF. Check console for details.');
+  }
+}
+// --- Crop Performance Report ---
+
+export interface CropPerformanceReportItem {
+  cropId: string;
+  cropName: string;
+  totalPlanted: number;
+  totalProduction: number;
+  totalSales: number;
+  difference: number;
+  // Consider adding a 'unitNotes' field if units are mixed, e.g., "kg / pieces"
+}
+
+export interface CropPerformanceReportFilters extends DateRangeFilters {
+  // No crop-specific filters for now, but could be added later (e.g., select specific crops)
+}
+
+export async function getCropPerformanceReportData(
+  filters: CropPerformanceReportFilters
+): Promise<CropPerformanceReportItem[]> {
+  console.log('Fetching crop performance data with filters:', JSON.stringify(filters));
+
+  const { startDate, endDate } = filters;
+
+  // 1. Fetch Base Data
+  const allCrops = await db.crops.filter(c => c.is_deleted !== 1).toArray();
+  
+  let plantingLogsQuery = db.plantingLogs.filter(pl => pl.is_deleted !== 1);
+  if (startDate) plantingLogsQuery = plantingLogsQuery.and(pl => pl.planting_date >= startDate);
+  if (endDate) plantingLogsQuery = plantingLogsQuery.and(pl => pl.planting_date <= endDate);
+  const relevantPlantingLogs = await plantingLogsQuery.toArray();
+
+  let harvestLogsQuery = db.harvestLogs.filter(hl => hl.is_deleted !== 1);
+  if (startDate) harvestLogsQuery = harvestLogsQuery.and(hl => hl.harvest_date >= startDate);
+  if (endDate) harvestLogsQuery = harvestLogsQuery.and(hl => hl.harvest_date <= endDate);
+  const relevantHarvestLogs = await harvestLogsQuery.toArray();
+
+  let salesQuery = db.sales.filter(s => s.is_deleted !== 1);
+  if (startDate) salesQuery = salesQuery.and(s => s.sale_date >= startDate);
+  if (endDate) salesQuery = salesQuery.and(s => s.sale_date <= endDate);
+  const relevantSales = await salesQuery.toArray();
+  const relevantSaleIds = relevantSales.map(s => s.id);
+
+  const relevantSaleItems = await db.saleItems
+    .where('sale_id').anyOf(relevantSaleIds)
+    .and(si => si.is_deleted !== 1)
+    .toArray();
+
+  // Supporting tables for linking (fetch all non-deleted for simplicity in linking)
+  const seedBatches = await db.seedBatches.filter(sb => sb.is_deleted !== 1).toArray();
+  const seedlingProductionLogs = await db.seedlingProductionLogs.filter(sl => sl.is_deleted !== 1).toArray();
+  const purchasedSeedlings = await db.purchasedSeedlings.filter(ps => ps.is_deleted !== 1).toArray();
+  const inputInventoryItems = await db.inputInventory.filter(ii => ii.is_deleted !== 1).toArray(); // Renamed to avoid conflict
+  const trees = await db.trees.filter(t => t.is_deleted !== 1).toArray();
+
+  // 2. Create Maps
+  const seedBatchesMap = new Map(seedBatches.map(sb => [sb.id, sb]));
+  const seedlingLogsMap = new Map(seedlingProductionLogs.map(sl => [sl.id, sl]));
+  const purchasedSeedlingsMap = new Map(purchasedSeedlings.map(ps => [ps.id, ps]));
+  const inputInventoryMap = new Map(inputInventoryItems.map(ii => [ii.id, ii]));
+  const treesMap = new Map(trees.map(t => [t.id, t]));
+  const cropsMap = new Map(allCrops.map(c => [c.id, c]));
+
+  const reportItems: CropPerformanceReportItem[] = [];
+
+  // Helper to get crop_id from a plantingLog
+  const getCropIdForPlantingLog = (pl: PlantingLog): string | undefined => {
+    if (pl.seed_batch_id) return seedBatchesMap.get(pl.seed_batch_id)?.crop_id;
+    if (pl.seedling_production_log_id) return seedlingLogsMap.get(pl.seedling_production_log_id)?.crop_id;
+    if (pl.purchased_seedling_id) {
+      const purchasedSeedling = purchasedSeedlingsMap.get(pl.purchased_seedling_id);
+      return purchasedSeedling?.crop_id;
+    }
+    if (pl.input_inventory_id) return inputInventoryMap.get(pl.input_inventory_id)?.crop_id;
+    return undefined;
+  };
+  
+  // Group planting logs by crop_id
+  const plantingLogsByCrop = new Map<string, PlantingLog[]>();
+  for (const pl of relevantPlantingLogs) {
+    const cropId = getCropIdForPlantingLog(pl);
+    if (cropId) {
+      if (!plantingLogsByCrop.has(cropId)) {
+        plantingLogsByCrop.set(cropId, []);
+      }
+      plantingLogsByCrop.get(cropId)!.push(pl);
+    }
+  }
+
+  // Group harvest logs by crop_id (more complex due to tree_id or planting_log_id)
+  const harvestLogsByCrop = new Map<string, HarvestLog[]>();
+  for (const hl of relevantHarvestLogs) {
+    let cropId: string | undefined;
+    if (hl.tree_id) {
+      const tree = treesMap.get(hl.tree_id);
+      // For trees, we might use the tree.id itself as a proxy for a "crop" if no direct crop_id link exists
+      // Or, if trees are meant to be linked to a Crop entry (e.g. "Olive Tree" crop), that link needs to be established.
+      // For this report, let's assume tree.identifier or species can map to a crop name.
+      // We'll handle tree-based crops separately after iterating through standard crops.
+    } else if (hl.planting_log_id) {
+      const pl = await db.plantingLogs.get(hl.planting_log_id); // Fetch to ensure we have the full PL
+      if (pl) cropId = getCropIdForPlantingLog(pl);
+    }
+    if (cropId) {
+      if (!harvestLogsByCrop.has(cropId)) harvestLogsByCrop.set(cropId, []);
+      harvestLogsByCrop.get(cropId)!.push(hl);
+    }
+  }
+  
+  // Group sale items by crop_id (via harvest_log -> planting_log -> crop associations)
+  const saleItemsByCrop = new Map<string, SaleItem[]>();
+  for (const si of relevantSaleItems) {
+    if (si.harvest_log_id) {
+      const hl = await db.harvestLogs.get(si.harvest_log_id); // Fetch full HL
+      if (hl && hl.is_deleted !== 1) {
+        let cropId: string | undefined;
+        if (hl.planting_log_id) {
+          const pl = await db.plantingLogs.get(hl.planting_log_id);
+          if (pl) cropId = getCropIdForPlantingLog(pl);
+        }
+        // Tree-based sale item linking to crop would be more complex here
+        // if not directly linked via a planting log that has a crop_id.
+        if (cropId) {
+          if (!saleItemsByCrop.has(cropId)) saleItemsByCrop.set(cropId, []);
+          saleItemsByCrop.get(cropId)!.push(si);
+        }
+      }
+    }
+    // Note: Sales of items directly from input_inventory or purchased_seedlings not linked to a harvest_log
+    // are not directly attributed to a "crop's production" in this report's context.
+  }
+
+  // 3. Iterate Through Crops
+  for (const crop of allCrops) {
+    const cropPlantingLogs = plantingLogsByCrop.get(crop.id) || [];
+
+    const totalPlanted = cropPlantingLogs.reduce((sum, pl) => {
+      return sum + pl.quantity_planted;
+    }, 0);
+
+    const cropHarvestLogs = harvestLogsByCrop.get(crop.id) || [];
+    const totalProduction = cropHarvestLogs.reduce((sum, hl) => sum + hl.quantity_harvested, 0);
+    
+    const cropSaleItems = saleItemsByCrop.get(crop.id) || [];
+    const totalSales = cropSaleItems.reduce((sum, si) => sum + si.quantity_sold, 0);
+
+    reportItems.push({
+      cropId: crop.id,
+      cropName: crop.name + (crop.variety ? ` (${crop.variety})` : ''),
+      totalPlanted,
+      totalProduction,
+      totalSales,
+      difference: totalProduction - totalSales,
+    });
+  }
+  
+  // Handle Tree "Crops" - this is a simplification.
+  // A more robust system might have a "Crop" entry for each tree type (e.g., "Olive Tree")
+  // and HarvestLogs from trees would link to that Crop ID.
+  // For now, we list trees as separate "crops" based on their identifier/species.
+  const treeHarvestsMap = new Map<string, {production: number, sales: number, plantingLogs: PlantingLog[]}>();
+
+  for (const hl of relevantHarvestLogs) {
+    if (hl.tree_id) {
+      const tree = treesMap.get(hl.tree_id);
+      if (tree) {
+        const treeCropName = tree.identifier || tree.species || `Tree ID: ${tree.id.substring(0,6)}`;
+        if (!treeHarvestsMap.has(treeCropName)) {
+          treeHarvestsMap.set(treeCropName, { production: 0, sales: 0, plantingLogs: [] });
+        }
+        treeHarvestsMap.get(treeCropName)!.production += hl.quantity_harvested;
+
+        // Find sales for this tree harvest log
+        const salesForThisTreeHarvest = relevantSaleItems.filter(si => si.harvest_log_id === hl.id);
+        treeHarvestsMap.get(treeCropName)!.sales += salesForThisTreeHarvest.reduce((sum, si) => sum + si.quantity_sold, 0);
+        // Note: "Total Planted" for trees is not directly applicable from PlantingLogs in the same way.
+        // We could count trees if that's desired, or use their planting_date. For now, totalPlanted will be 0 for trees.
+      }
+    }
+  }
+
+  treeHarvestsMap.forEach((data, treeCropName) => {
+    reportItems.push({
+      cropId: `tree-${treeCropName}`, // Create a pseudo ID
+      cropName: treeCropName,
+      totalPlanted: 0, // Or count of trees, or some other metric
+      totalProduction: data.production,
+      totalSales: data.sales,
+      difference: data.production - data.sales,
+    });
+  });
+
+
+  return reportItems.sort((a,b) => a.cropName.localeCompare(b.cropName));
+}
+
+// CSV and PDF export functions for Crop Performance will be added here later.
+// Function to convert crop performance data to CSV format
+function convertCropPerformanceToCSV(data: CropPerformanceReportItem[]): string {
+  if (data.length === 0) return '';
+  const headers = [
+    "Crop ID", "Crop Name", "Total Planted", "Total Production", 
+    "Total Sales", "Difference (Prod - Sales)"
+  ];
+  const csvRows = [headers.join(',')];
+
+  data.forEach(item => {
+    const row = [
+      `"${item.cropId}"`,
+      `"${item.cropName.replace(/"/g, '""')}"`, // Escape double quotes in name
+      item.totalPlanted,
+      item.totalProduction,
+      item.totalSales,
+      item.difference
+    ];
+    csvRows.push(row.join(','));
+  });
+  return csvRows.join('\\n');
+}
+
+// Function to trigger CSV download for crop performance report
+export async function exportCropPerformanceReportToCSV(filters: CropPerformanceReportFilters): Promise<void> {
+  try {
+    const reportData = await getCropPerformanceReportData(filters);
+    if (reportData.length === 0) {
+      alert("No data available for the selected filters.");
+      return;
+    }
+    const csvData = convertCropPerformanceToCSV(reportData);
+    const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+    const now = new Date();
+    const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const suggestedName = `reports/Hurvesthub_CropPerformance_Report_${dateStamp}.csv`;
+
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        const handle = await window.showSaveFilePicker({ suggestedName, types: [{ description: 'CSV files', accept: { 'text/csv': ['.csv'] } }] });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error('Error saving CSV with File System Access API, falling back:', err);
+          try {
+            saveAs(blob, suggestedName);
+          } catch (saveAsErr) {
+            console.error('Error during saveAs fallback for CSV:', saveAsErr);
+            alert('Failed to save CSV using fallback. Check console.');
+          }
+        } else {
+          console.log('CSV save aborted by user.');
+        }
+      }
+    } else {
+      try {
+        saveAs(blob, suggestedName);
+      } catch (saveAsErr) {
+        console.error('Error during saveAs for CSV:', saveAsErr);
+        alert('Failed to save CSV. Check console.');
+      }
+    }
+  } catch (error) {
+    console.error('Error exporting crop performance to CSV:', error);
+    alert('Failed to export crop performance to CSV. Check console.');
+  }
+}
+
+// Function to trigger PDF download for crop performance report
+export async function exportCropPerformanceReportToPDF(filters: CropPerformanceReportFilters): Promise<void> {
+  try {
+    const reportData = await getCropPerformanceReportData(filters);
+    if (reportData.length === 0) {
+      alert("No data available for the selected filters.");
+      return;
+    }
+
+    const pdfDoc = await PDFDocument.create();
+    await pdfDoc.registerFontkit(fontkit);
+
+    const fetchFont = async (url: string) => {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch font: ${response.status} ${response.statusText} for ${url}`);
+      }
+      return response.arrayBuffer();
+    };
+
+    const fontBytes = await fetchFont("/fonts/static/NotoSans-Regular.ttf");
+    const boldFontBytes = await fetchFont("/fonts/static/NotoSans-Bold.ttf");
+    const mainFont = await pdfDoc.embedFont(fontBytes);
+    const boldFont = await pdfDoc.embedFont(boldFontBytes);
+    
+    let page = pdfDoc.addPage();
+    let yPos = { y: page.getHeight() - 50 };
+
+    await addPdfHeader(pdfDoc, page, yPos, mainFont, boldFont);
+    
+    page.drawText('Crop Performance Report', { x: 50, y: yPos.y, size: 18, font: boldFont, color: rgb(0.1, 0.1, 0.1) });
+    yPos.y -= 25;
+
+    const filterDescriptions = [
+      filters.startDate && `From: ${formatDateToDDMMYYYY(filters.startDate)}`,
+      filters.endDate && `To: ${formatDateToDDMMYYYY(filters.endDate)}`,
+    ].filter(Boolean).join(' | ');
+
+    if (filterDescriptions) {
+        page.drawText(`Filters: ${filterDescriptions}`, { x: 50, y: yPos.y, size: 9, font: mainFont, color: rgb(0.3, 0.3, 0.3) });
+        yPos.y -= 15;
+    }
+    
+    const tableHeaders = ["Crop Name", "Total Planted", "Total Production", "Total Sales", "Difference"];
+    // Approximate widths, adjust as needed. Total should be around 500-515 for A4 portrait with margins.
+    const columnWidths = [150, 80, 90, 80, 80]; 
+
+    const tableData = reportData.map(item => [
+      item.cropName,
+      item.totalPlanted.toString(),
+      item.totalProduction.toString(),
+      item.totalSales.toString(),
+      item.difference.toString()
+    ]);
+
+    page = await drawPdfTable(pdfDoc, page, yPos, tableHeaders, tableData, columnWidths, { font: mainFont, boldFont: boldFont, fontSize: 8, headerFontSize: 10 });
+
+    const pdfBytes = await pdfDoc.save();
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+    const now = new Date();
+    const dateStamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const suggestedName = `reports/Hurvesthub_CropPerformance_Report_${dateStamp}.pdf`;
+
+    if (typeof window.showSaveFilePicker === 'function') {
+      try {
+        const handle = await window.showSaveFilePicker({ suggestedName, types: [{ description: 'PDF files', accept: { 'application/pdf': ['.pdf'] } }] });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          console.error('Error saving PDF with File System Access API, falling back:', err);
+          try {
+            saveAs(blob, suggestedName);
+          } catch (saveAsErr) {
+            console.error('Error during saveAs fallback for PDF:', saveAsErr);
+            alert('Failed to save PDF using fallback. Check console.');
+          }
+        } else {
+          console.log('PDF save aborted by user.');
+        }
+      }
+    } else {
+      try {
+        saveAs(blob, suggestedName);
+      } catch (saveAsErr) {
+        console.error('Error during saveAs for PDF:', saveAsErr);
+        alert('Failed to save PDF. Check console.');
+      }
+    }
+  } catch (error) {
+    console.error('Error exporting crop performance to PDF:', error);
+    alert('Failed to export crop performance to PDF. Check console.');
   }
 }

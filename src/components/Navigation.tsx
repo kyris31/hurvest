@@ -21,6 +21,7 @@ const navItems = [
   { href: '/suppliers', label: 'Suppliers' }, // Added Suppliers
   { href: '/trees', label: 'Trees' }, // Added Trees link
   { href: '/reminders', label: 'Reminders' },
+{ href: '/expenses', label: 'General Expenses' },
   // Planning items will be moved to a dropdown
   { href: '/poultry/flocks', label: 'Poultry' },
   { href: '/reports', label: 'Reports' },

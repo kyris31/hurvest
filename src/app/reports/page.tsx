@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/db';
@@ -434,6 +435,32 @@ export default function ReportsPage() {
               )}
             </div>
 
+{/* General Expenses Reports */}
+            <div className="border-t pt-6">
+              <h3 className="text-lg font-medium text-gray-700 mb-2">General Expenses Reports</h3>
+              <p className="text-xs text-gray-500 mb-3">View and export general operational expenses. Uses the general Start/End Date filters and specific expense filters on the report page.</p>
+              <div className="flex flex-wrap gap-4">
+                <Link
+                  href="/reports/general-expenses"
+                  className="bg-gray-600 hover:bg-gray-700 text-white font-semibold py-2 px-4 rounded shadow-sm transition-colors duration-150"
+                >
+                  View General Expenses Report Page
+                </Link>
+              </div>
+            </div>
+{/* Crop Performance Report */}
+            <div className="border-t pt-6">
+              <h3 className="text-lg font-medium text-gray-700 mb-2">Crop Performance Report</h3>
+              <p className="text-xs text-gray-500 mb-3">View total planted, production, sales, and difference for each crop within a selected period.</p>
+              <div className="flex flex-wrap gap-4">
+                <Link
+                  href="/reports/crop-performance"
+                  className="bg-purple-600 hover:bg-purple-700 text-white font-semibold py-2 px-4 rounded shadow-sm transition-colors duration-150"
+                >
+                  View Crop Performance Report
+                </Link>
+              </div>
+            </div>
 
             {/* Planting Log Reports */}
             <div className="border-t pt-6">

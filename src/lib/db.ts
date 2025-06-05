@@ -573,6 +573,26 @@ export interface SupplierInvoiceItem {
   deleted_at?: string;
 }
 
+export interface GeneralExpense {
+  id: string; // UUID
+  service_type: 'WATER' | 'ELECTRICITY' | 'TELEPHONE' | 'FIELD_TAXES' | 'INTERNET' | 'VEHICLE_MAINTENANCE' | 'OTHER';
+  category?: string;
+  provider?: string;
+  bill_date: string; // date
+  due_date: string; // date
+  amount: number; // numeric
+  payment_status: 'UNPAID' | 'PAID' | 'PARTIALLY_PAID';
+  payment_date?: string; // date
+  payment_amount?: number; // numeric
+  reference_number?: string;
+  notes?: string;
+  created_at?: string; // timestamptz
+  updated_at?: string; // timestamptz
+  is_deleted?: number; // smallint
+  deleted_at?: string; // timestamptz
+  _synced?: number; // smallint
+  _last_modified?: number; // bigint
+}
 
 export type HurvesthubTableName =
   | 'suppliers'
@@ -593,6 +613,7 @@ export type HurvesthubTableName =
   | 'flocks'
   | 'flock_records' 
   | 'feed_logs'   
+| 'general_expenses'
   | 'preventive_measure_schedules' 
   | 'supplierInvoices'
   | 'supplierInvoiceItems'
@@ -637,6 +658,7 @@ export class HurvesthubDB extends Dexie {
   cropPlanStages!: Table<CropPlanStage, string>;
   cropPlanTasks!: Table<CropPlanTask, string>;
   plannedStageResources!: Table<PlannedStageResource, string>;
+general_expenses!: Table<GeneralExpense, string>;
 
   constructor() {
     super('HurvesthubDB');
@@ -1439,6 +1461,40 @@ export class HurvesthubDB extends Dexie {
       console.log("Upgrading HurvesthubDB to version 34: Adding user_id to cultivationLogs schema.");
     });
 
+    this.version(35).stores({
+      plannedStageResources: 'id, crop_plan_stage_id, resource_type, input_inventory_id, _last_modified, _synced, is_deleted',
+      plots: 'id, name, status, _last_modified, _synced, is_deleted',
+      cropSeasons: 'id, name, start_date, end_date, _last_modified, _synced, is_deleted',
+      cropPlans: 'id, crop_id, plot_id, crop_season_id, status, planned_sowing_date, planned_transplant_date, _last_modified, _synced, is_deleted',
+      cropPlanStages: 'id, crop_plan_id, stage_type, status, planned_start_date, _last_modified, _synced, is_deleted',
+      cropPlanTasks: 'id, crop_plan_stage_id, status, planned_due_date, assigned_to_user_id, _last_modified, _synced, is_deleted',
+      plantingLogs: 'id, seedling_production_log_id, seed_batch_id, input_inventory_id, purchased_seedling_id, crop_plan_id, status, planting_date, plot_affected, _last_modified, _synced, is_deleted',
+      supplierInvoices: 'id, supplier_id, invoice_number, invoice_date, status, [supplier_id+invoice_number], _last_modified, _synced, is_deleted',
+      supplierInvoiceItems: 'id, supplier_invoice_id, input_inventory_id, [supplier_invoice_id+is_deleted], _last_modified, _synced, is_deleted',
+      inputInventory: 'id, name, type, crop_id, supplier_id, supplier_invoice_number, total_purchase_cost, cost_per_unit, current_quantity, initial_quantity, minimum_stock_level, qr_code_data, _last_modified, _synced, is_deleted',
+      seedBatches: 'id, crop_id, batch_code, source_type, date_added_to_inventory, initial_quantity, current_quantity, qr_code_data, supplier_id, _last_modified, _synced, is_deleted',
+      sales: 'id, customer_id, sale_date, payment_method, payment_status, amount_paid, _last_modified, _synced, is_deleted',
+      flocks: 'id, name, flock_type, species, hatch_date, _last_modified, _synced, is_deleted',
+      preventive_measure_schedules: 'id, name, measure_type, target_species, trigger_offset_days, is_recurring, _last_modified, _synced, is_deleted',
+      flock_records: 'id, flock_id, record_type, record_date, weight_kg_total, cost, revenue, _last_modified, _synced, is_deleted',
+      feed_logs: 'id, flock_id, feed_date, feed_type_id, feed_cost, _last_modified, _synced, is_deleted',
+      suppliers: 'id, name, is_deleted, _last_modified, _synced',
+      crops: 'id, name, variety, type, notes, is_deleted, _last_modified, _synced',
+      cultivationLogs: 'id, user_id, activity_date, activity_type, plot_affected, _last_modified, _synced, is_deleted',
+      cultivationActivityPlantingLinks: 'id, cultivation_log_id, planting_log_id, _last_modified, _synced, is_deleted, &[cultivation_log_id+planting_log_id]',
+      cultivationActivityUsedInputs: 'id, cultivation_log_id, input_inventory_id, quantity_used, quantity_unit, _last_modified, _synced, is_deleted, &[cultivation_log_id+input_inventory_id]',
+      harvestLogs: 'id, planting_log_id, tree_id, harvest_date, current_quantity_available, is_deleted, _last_modified, _synced',
+      customers: 'id, name, customer_type, is_deleted, _last_modified, _synced',
+      saleItems: 'id, sale_id, harvest_log_id, input_inventory_id, purchased_seedling_id, quantity_sold, price_per_unit, discount_type, discount_value, is_deleted, _last_modified, _synced',
+      invoices: 'id, sale_id, invoice_number, is_deleted, _last_modified, _synced',
+      syncMeta: 'id',
+      trees: 'id, identifier, species, variety, planting_date, plot_affected, is_deleted, _last_modified, _synced',
+      reminders: 'id, planting_log_id, flock_id, reminder_date, activity_type, is_completed, _last_modified, _synced, is_deleted',
+      seedlingProductionLogs: 'id, seed_batch_id, crop_id, sowing_date, _last_modified, _synced, is_deleted',
+      purchasedSeedlings: 'id, name, crop_id, supplier_id, purchase_date, initial_quantity, current_quantity, is_deleted, _last_modified, _synced',
+      general_expenses: 'id, service_type, category, bill_date, due_date, payment_status, is_deleted, _last_modified'
+    }); // No upgrade function needed as it's a new table
+
     console.log('[HurvesthubDB] Constructor: Finished defining all versions.');
 
     // Add 'ready' event listener
@@ -1496,6 +1552,7 @@ export class HurvesthubDB extends Dexie {
     this.cropPlanStages = this.table('cropPlanStages');
     this.cropPlanTasks = this.table('cropPlanTasks');
     this.plannedStageResources = this.table('plannedStageResources');
+this.general_expenses = this.table('general_expenses');
 
     // Post-versioning sanity check for table instantiation
     try {
@@ -1569,6 +1626,7 @@ export async function getSyncStatus(): Promise<Record<string, { unsynced: number
         'plannedStageResources',
         'cultivationActivityPlantingLinks', 
         'cultivationActivityUsedInputs'     
+, 'general_expenses'
     ];
 
     for (const tableName of tableNames) {

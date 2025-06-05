@@ -86,3 +86,71 @@ export function formatDateToDDMMYYYY(dateInput: string | Date | null | undefined
 
   return `${dayStr}/${monthStr}/${yearStr}`;
 }
+/**
+ * Formats a date string or Date object to YYYY-MM-DD format.
+ * Returns an empty string for null/undefined/invalid input, suitable for date input value.
+ */
+export function formatDateToYYYYMMDD(dateInput: string | Date | null | undefined): string {
+  if (dateInput === null || dateInput === undefined || dateInput === '') {
+    return ''; // Return empty string for date inputs
+  }
+
+  let date: Date;
+  let useUtcGetters = false;
+
+  if (typeof dateInput === 'string') {
+    const isoMatch = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/);
+    if (isoMatch) {
+      date = new Date(Date.UTC(
+        parseInt(isoMatch[1], 10),
+        parseInt(isoMatch[2], 10) - 1,
+        parseInt(isoMatch[3], 10)
+      ));
+      useUtcGetters = true;
+    } else {
+      const euroMatch = dateInput.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      if (euroMatch) {
+        const dayPart = parseInt(euroMatch[1], 10);
+        const monthPart = parseInt(euroMatch[2], 10);
+        const yearPart = parseInt(euroMatch[3], 10);
+        if (monthPart >= 1 && monthPart <= 12 && dayPart >= 1 && dayPart <= 31) {
+            date = new Date(Date.UTC(yearPart, monthPart - 1, dayPart));
+            if (date.getUTCFullYear() === yearPart && date.getUTCMonth() === monthPart - 1 && date.getUTCDate() === dayPart) {
+                useUtcGetters = true;
+            } else {
+                date = new Date(NaN); 
+            }
+        } else {
+            date = new Date(NaN);
+        }
+      } else {
+        date = new Date(dateInput);
+      }
+    }
+  } else {
+    date = dateInput;
+  }
+
+  if (isNaN(date.getTime())) {
+    return ''; // Return empty string for invalid dates
+  }
+
+  let dayValue: number;
+  let monthValue: number; // 1-indexed month
+  let yearValue: number;
+
+  if (useUtcGetters) {
+    dayValue = date.getUTCDate();
+    monthValue = date.getUTCMonth() + 1;
+    yearValue = date.getUTCFullYear();
+  } else {
+    dayValue = date.getDate();
+    monthValue = date.getMonth() + 1;
+    yearValue = date.getFullYear();
+  }
+  
+  const dayStr = String(dayValue).padStart(2, '0');
+  const monthStr = String(monthValue).padStart(2, '0');
+  
+  return `${yearValue}-${monthStr}-${dayStr}`;
+}
